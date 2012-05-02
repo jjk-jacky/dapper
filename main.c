@@ -211,145 +211,124 @@ clean:
     fclose (fp);
 }
 
-/**
- * Finds string str in NULL-terminated array list
- * 
- * @param list
- * @param str
- * @return 
- */
-static inline char *
-find_str (char **list, char *str)
+void
+process_dir (list_t **files, const char *dir)
 {
-    for ( ; *list; ++list)
+    static const char **dirs     = NULL;
+    static int          alloc    = 0;
+    static int          len      = 0;
+    int                 i;
+    
+    /* make sure this dir hasn't been processed already. This is in case e.g.
+     * XDG_CONFIG_DIRS was set to /etc/xdg:/etc/xdg:/etc/xdg */
+    for (i = 0; i < len; ++i)
     {
-        if (strcmp (str, *list) == 0)
+        if (strcmp (dirs[i], dir) == 0)
         {
-            return *list;
+            return;
         }
     }
-    return NULL;
+    if (len == alloc)
+    {
+        alloc += 10;
+        dirs = realloc (dirs, sizeof (*dirs) * alloc);
+    }
+    dirs[len++] = strdup (dir);
+    
+    DIR           *dp;
+    struct dirent *dirent;
+    char           buf[4096];
+    int            l;
+    char          *s;
+    
+    l = snprintf (buf, 4096, "%s/autostart", dir);
+    if (l < 4096)
+    {
+        s = buf;
+    }
+    else
+    {
+        s = malloc (sizeof (*s) * (l + 1));
+        snprintf (s, l, "%s/autostart", dir);
+    }
+    
+    dp = opendir (s);
+    while ((dirent = readdir (dp)))
+    {
+        if (!(dirent->d_type & DT_REG))
+        {
+            /* ignore directory, etc -- symlinks to file are NOT ignored */
+            continue;
+        }
+
+        l = strlen (dirent->d_name);
+        /* 8 == strlen (".desktop") */
+        if (l < 8 || strcmp (".desktop", &dirent->d_name[l - 8]) != 0)
+        {
+            /* ignore anything not .desktop */
+            continue;
+        }
+
+        /* add item to list, unless already present (from previous dir)  */
+        add_to_list (files, s, dirent->d_name);
+    }
+    closedir (dp);
+    
+    if (s != buf)
+    {
+        free (s);
+    }
 }
 
 int
 main (int argc, char **argv)
 {
-    
-    /* STEP 1: get list of dirs where to look for .desktop files */
-    
-    char **dirs;
-    int    alloc    = 10;
-    int    len      = 0;
-    char  *user_dir = NULL;
-    char  *cfg_dirs = NULL;
-    char  *s;
-    char  *ss;
-    
-    /* NULL-terminated pointers to the dirs to look for .desktop files, in order */
-    dirs = malloc (sizeof (*dirs) * (alloc + 1));
-    memset (dirs, '\0', alloc + 1);
+    list_t *files   = NULL;
+    char   *dir;
+    char   *s       = NULL;
+    char   *ss;
     
     /* start with user dir */
-    if ((s = getenv ("XDG_CONFIG_HOME")))
+    if (!(dir = getenv ("XDG_CONFIG_HOME")))
     {
-        dirs[len++] = s;
+        /* not defined, use default */
+        if ((s = getenv ("HOME")))
+        {
+            /* 8 = strlen("/.config") + 1 for NULL */
+            dir = malloc (sizeof (*dir) * (strlen (s) + 9));
+            sprintf (dir, "%s/.config", s);
+        }
+        else
+        {
+            fprintf (stderr,
+                     "XDG_CONFIG_HOME not defined, unable to get HOME for default\n");
+            return 1;
+        }
     }
-    /* not defined, use default */
-    else if ((s = getenv ("HOME")))
+    process_dir (&files, (const char *) dir);
+    if (s)
     {
-        /* 8 = strlen("/.config") + 1 for NULL */
-        ss = user_dir = malloc (sizeof (*ss) * (strlen (s) + 9));
-        sprintf (ss, "%s/.config", s);
-        dirs[len++] = ss;
-    }
-    else
-    {
-        fprintf (stderr, "XDG_CONFIG_HOME not defined, unable to get HOME for default\n");
-        return 1;
+        free (dir);
     }
     
     /* then system wide dirs */
     if ((s = getenv ("XDG_CONFIG_DIRS-")))
     {
-        s = cfg_dirs = strdup (s);
-        while ((ss = strchr (s, ':')))
+        dir = s = strdup (s);
+        while ((ss = strchr (dir, ':')))
         {
             *ss = '\0';
-            /* make sure this path isn't already on the list */
-            if (!find_str (dirs, s))
-            {
-                /* do we need to re-alloc? 
-                 * Note: this also accounts for the one after the while loop */
-                if (len + 1 == alloc)
-                {
-                    alloc += 10;
-                    dirs = realloc (dirs, sizeof (*dirs) * (alloc + 1));
-                    memset (&dirs[len + 1], '\0', 10);
-                }
-                dirs[len++] = s;
-            }
-            s = ss + 1;
+            process_dir (&files, dir);
+            dir = ss + 1;
         }
-        /* make sure this path isn't already on the list */
-        if (!find_str (dirs, s))
-        {
-            dirs[len++] = s;
-        }
+        process_dir (&files, dir);
+        free (s);
     }
     /* not defined, use default */
     else
     {
-//        dirs[len++] = "/etc/xdg";
+//        process_dir (&files, "/etc/xdg");
     }
-    
-    /* STEP 2: look for .desktop files */
-    
-    list_t        *files = NULL;
-    DIR           *dir;
-    struct dirent *dirent;
-    char         **d;
-    char           buf[4096];
-    int            l;
-    
-    for (d = dirs; *d; ++d)
-    {
-        l = snprintf (buf, 4096, "%s/autostart", *d);
-        if (l < 4096)
-        {
-            s = buf;
-        }
-        else
-        {
-            s = malloc (sizeof (*s) * (l + 1));
-            snprintf (s, l, "%s/autostart", *d);
-        }
-        dir = opendir (s);
-        while ((dirent = readdir (dir)))
-        {
-            if (!(dirent->d_type & DT_REG))
-            {
-                continue;
-            }
-            
-            l = strlen (dirent->d_name);
-            /* 8 == strlen (".desktop") */
-            if (l < 8 || strcmp (".desktop", &dirent->d_name[l - 8]) != 0)
-            {
-                continue;
-            }
-            
-            /* add item to list, unless already present (from previous dir)  */
-            add_to_list (&files, s, dirent->d_name);
-        }
-        closedir (dir);
-        if (s != buf)
-        {
-            free (s);
-        }
-    }
-    free (user_dir);
-    free (cfg_dirs);
-    free (dirs);
     
     /* STEP 3: parse .desktop files, starting what needs to be */
     
