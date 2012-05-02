@@ -14,57 +14,11 @@ typedef struct
     int          len;
 } dirs_t;
 
-typedef struct _list_t
+typedef struct _files_t
 {
-    char            *pathname;
-    char            *filename;
-    struct _list_t  *next;
-} list_t;
-
-/**
- * Adds the given path/file to the list of files to process, unless there's
- * already an item for that file (from a previous dir)
- * 
- * @param list          pointer to address of the (first item of the) list
- * @param path
- * @param filename
- */
-void
-add_to_list (list_t **list, char *path, char *filename)
-{
-    list_t  *l;
-    list_t  *last;
-    list_t  *item;
-    int      len;
-    
-    /* make sure we don't already have this item (from a previous dir) */
-    for (l = *list; l; l = l->next)
-    {
-        last = l;
-        if (strcmp (filename, l->filename) == 0)
-        {
-            return;
-        }
-    }
-    
-    item = malloc (sizeof (*item));
-    len = strlen (path) + 1 + strlen (filename);
-    item->pathname = malloc (sizeof (*item->pathname) * (len + 1));
-    sprintf (item->pathname, "%s/%s", path, filename);
-    item->filename = item->pathname + strlen (path) + 1;
-    item->next = NULL;
-    
-    /* if we have a list, update the next pointer of the last item (l),
-     * else this becomes the first item of the list */
-    if (*list)
-    {
-        last->next = item;
-    }
-    else
-    {
-        *list = item;
-    }
-}
+    char            *name;
+    struct _files_t *next;
+} files_t;
 
 void
 trim (char *str)
@@ -219,7 +173,7 @@ clean:
 }
 
 void
-process_dir (dirs_t *dirs, list_t **files, const char *dir)
+process_dir (dirs_t *dirs, files_t **files, const char *dir)
 {
     int i;
     
@@ -243,20 +197,22 @@ process_dir (dirs_t *dirs, list_t **files, const char *dir)
     struct dirent *dirent;
     char           buf[4096];
     int            l;
-    char          *s;
+    char          *path;
+    int            len_path;
     
     l = snprintf (buf, 4096, "%s/autostart", dir);
     if (l < 4096)
     {
-        s = buf;
+        path = buf;
     }
     else
     {
-        s = malloc (sizeof (*s) * (l + 1));
-        snprintf (s, l, "%s/autostart", dir);
+        path = malloc (sizeof (*path) * (l + 1));
+        snprintf (path, l, "%s/autostart", dir);
     }
     
-    dp = opendir (s);
+    len_path = strlen (path);
+    dp = opendir (path);
     while ((dirent = readdir (dp)))
     {
         if (!(dirent->d_type & DT_REG))
@@ -272,26 +228,80 @@ process_dir (dirs_t *dirs, list_t **files, const char *dir)
             /* ignore anything not .desktop */
             continue;
         }
-
-        /* add item to list, unless already present (from previous dir)  */
-        add_to_list (files, s, dirent->d_name);
+        
+        files_t  *f;
+        files_t  *last;
+        files_t  *file;
+        int       process;
+        char     *s;
+        
+        /* make sure we don't already have this item (from a previous dir) */
+        process = 1;
+        for (f = *files; f; f = f->next)
+        {
+            last = f;
+            if (strcmp (dirent->d_name, f->name) == 0)
+            {
+                process = 0;
+                break;
+            }
+        }
+        
+        if (process)
+        {
+            file = malloc (sizeof (*file));
+            file->name = strdup (dirent->d_name);
+            file->next = NULL;
+            
+            char  buf2[4096];
+            char *s2;
+            l = snprintf (buf2, 4096, "%s/%s", path, dirent->d_name);
+            if (l < 4096)
+            {
+                s2 = buf2;
+            }
+            else
+            {
+                s2 = malloc (sizeof (*s2) * (l + 1));
+                snprintf (s2, l, "%s/%s", path, dirent->d_name);
+            }
+            
+            printf("%s\n", s2);
+            parse_file (s2);
+            
+            if (s2 != buf2)
+            {
+                free (s2);
+            }
+            
+            /* if we have a list, update the next pointer of the last item (l),
+            * else this becomes the first item of the list */
+            if (*files)
+            {
+                last->next = file;
+            }
+            else
+            {
+                *files = file;
+            }
+        }
     }
     closedir (dp);
     
-    if (s != buf)
+    if (path != buf)
     {
-        free (s);
+        free (path);
     }
 }
 
 int
 main (int argc, char **argv)
 {
-    dirs_t  dirs    = { NULL, 0, 0 };
-    list_t *files   = NULL;
-    char   *dir;
-    char   *s       = NULL;
-    char   *ss;
+    dirs_t   dirs    = { NULL, 0, 0 };
+    files_t *files   = NULL;
+    char    *dir;
+    char    *s       = NULL;
+    char    *ss;
     
     /* start with user dir */
     if (!(dir = getenv ("XDG_CONFIG_HOME")))
@@ -334,19 +344,6 @@ main (int argc, char **argv)
     {
 //        process_dir (&files, "/etc/xdg");
     }
-    
-    /* STEP 3: parse .desktop files, starting what needs to be */
-    
-    list_t *f;
-    
-    for (f = files; f; f = f->next)
-    {
-        printf("%s as in %s\n", f->filename, f->pathname);
-        parse_file (f->pathname);
-        
-        free (f->pathname);
-    }
-    free (files);
     
     int i;
     for (i = 0; i < dirs.len; ++i)
