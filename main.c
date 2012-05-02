@@ -275,7 +275,7 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
             }
             
             /* if we have a list, update the next pointer of the last item (l),
-            * else this becomes the first item of the list */
+             * else this becomes the first item of the list */
             if (*files)
             {
                 last->next = file;
@@ -349,6 +349,15 @@ main (int argc, char **argv)
     for (i = 0; i < dirs.len; ++i)
     {
         free ((void *) dirs.dirs[i]);
+    }
+    free (dirs.dirs);
+    
+    files_t *f, *ff;
+    for (f = files; f; f = ff)
+    {
+        ff = f->next;
+        free (f->name);
+        free (f);
     }
     
     return 0;
