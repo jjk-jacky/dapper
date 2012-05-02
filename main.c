@@ -7,6 +7,13 @@
 #include <sys/stat.h>
 #include <ctype.h>
 
+typedef struct
+{
+    const char **dirs;
+    int          alloc;
+    int          len;
+} dirs_t;
+
 typedef struct _list_t
 {
     char            *pathname;
@@ -212,28 +219,25 @@ clean:
 }
 
 void
-process_dir (list_t **files, const char *dir)
+process_dir (dirs_t *dirs, list_t **files, const char *dir)
 {
-    static const char **dirs     = NULL;
-    static int          alloc    = 0;
-    static int          len      = 0;
-    int                 i;
+    int i;
     
     /* make sure this dir hasn't been processed already. This is in case e.g.
      * XDG_CONFIG_DIRS was set to /etc/xdg:/etc/xdg:/etc/xdg */
-    for (i = 0; i < len; ++i)
+    for (i = 0; i < dirs->len; ++i)
     {
-        if (strcmp (dirs[i], dir) == 0)
+        if (strcmp (dirs->dirs[i], dir) == 0)
         {
             return;
         }
     }
-    if (len == alloc)
+    if (dirs->len == dirs->alloc)
     {
-        alloc += 10;
-        dirs = realloc (dirs, sizeof (*dirs) * alloc);
+        dirs->alloc += 10;
+        dirs->dirs = realloc (dirs->dirs, sizeof (*dirs->dirs) * dirs->alloc);
     }
-    dirs[len++] = strdup (dir);
+    dirs->dirs[dirs->len++] = strdup (dir);
     
     DIR           *dp;
     struct dirent *dirent;
@@ -283,6 +287,7 @@ process_dir (list_t **files, const char *dir)
 int
 main (int argc, char **argv)
 {
+    dirs_t  dirs    = { NULL, 0, 0 };
     list_t *files   = NULL;
     char   *dir;
     char   *s       = NULL;
@@ -305,7 +310,7 @@ main (int argc, char **argv)
             return 1;
         }
     }
-    process_dir (&files, (const char *) dir);
+    process_dir (&dirs, &files, (const char *) dir);
     if (s)
     {
         free (dir);
@@ -318,10 +323,10 @@ main (int argc, char **argv)
         while ((ss = strchr (dir, ':')))
         {
             *ss = '\0';
-            process_dir (&files, dir);
+            process_dir (&dirs, &files, dir);
             dir = ss + 1;
         }
-        process_dir (&files, dir);
+        process_dir (&dirs, &files, dir);
         free (s);
     }
     /* not defined, use default */
@@ -342,6 +347,12 @@ main (int argc, char **argv)
         free (f->pathname);
     }
     free (files);
+    
+    int i;
+    for (i = 0; i < dirs.len; ++i)
+    {
+        free ((void *) dirs.dirs[i]);
+    }
     
     return 0;
 }
