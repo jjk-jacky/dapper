@@ -50,6 +50,12 @@ trim (char *str)
     }
 }
 
+typedef enum {
+    PARSE_OK        = 0,
+    PARSE_ABORTED,
+    PARSE_FAILED,
+} parse_t;
+
 void
 parse_file (char *file)
 {
@@ -66,9 +72,19 @@ parse_file (char *file)
     int  len = 0;
     int  l;
     
-    int  in_section = 0;
-    char *key;
-    char *value;
+    int     in_section  = 0;
+    char   *key;
+    char   *value;
+    parse_t state       = PARSE_OK;
+    
+    char *icon      = NULL;
+    int   hidden    = 0;
+    char *only_in   = NULL;
+    char *not_in    = NULL;
+    char *try_exec  = NULL;
+    char *exec      = NULL;
+    char *path      = NULL;
+    int   terminal  = 0;
     
     for (;;)
     {
@@ -142,17 +158,57 @@ parse_file (char *file)
                 if (strcmp (value, "Application") != 0)
                 {
                     printf("invalid type\n");
+                    state = PARSE_FAILED;
                 }
             }
             else if (strcmp (key, "Hidden") == 0)
             {
                 if (strcmp (value, "true") == 0)
                 {
+                    hidden = 1;
                     printf("is hidden\n");
+                    state = PARSE_ABORTED;
                 }
                 else if (strcmp (value, "false") != 0)
                 {
                     printf("invalid Hidden\n");
+                    state = PARSE_FAILED;
+                }
+            }
+            else if (strcmp (key, "Exec") == 0)
+            {
+                exec = strdup (value);
+            }
+            else if (strcmp (key, "TryExec") == 0)
+            {
+                try_exec = strdup (value);
+            }
+            else if (strcmp (key, "OnlyShowIn") == 0)
+            {
+                only_in = strdup (value);
+            }
+            else if (strcmp (key, "NotShowIn") == 0)
+            {
+                not_in = strdup (value);
+            }
+            else if (strcmp (key, "Icon") == 0)
+            {
+                icon = strdup (value);
+            }
+            else if (strcmp (key, "Path") == 0)
+            {
+                path = strdup (value);
+            }
+            else if (strcmp (key, "Terminal") == 0)
+            {
+                if (strcmp (value, "true") == 0)
+                {
+                    terminal = 1;
+                }
+                else if (strcmp (value, "false") != 0)
+                {
+                    printf ("invalid Terminal\n");
+                    state = PARSE_FAILED;
                 }
             }
             else
@@ -168,8 +224,39 @@ clean:
             alloc = len = 0;
         }
         s = NULL;
+        
+        if (state != PARSE_OK)
+        {
+            break;
+        }
     }
     fclose (fp);
+    
+    if (state == PARSE_OK || state == PARSE_ABORTED)
+    {
+        printf("parse ok\n");
+        
+        if (hidden)
+        {
+            printf("hidden\n");
+            goto done;
+        }
+        
+        printf("icon=%s\nonly=%s\nnot=%s\ntry=%s\nexec=%s\npath=%s\nterm=%d\n",
+               icon, only_in, not_in, try_exec, exec, path, terminal);
+    }
+    else /* if (state == PARSE_FAILED) */
+    {
+        printf("parse failed\n");
+    }
+    
+done:
+    free (icon);
+    free (only_in);
+    free (not_in);
+    free (try_exec);
+    free (exec);
+    free (path);
 }
 
 void
@@ -345,6 +432,8 @@ main (int argc, char **argv)
 //        process_dir (&files, "/etc/xdg");
     }
     
+    /* memory cleaning */
+    
     int i;
     for (i = 0; i < dirs.len; ++i)
     {
@@ -362,4 +451,3 @@ main (int argc, char **argv)
     
     return 0;
 }
-
