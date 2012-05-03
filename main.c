@@ -59,96 +59,83 @@ typedef enum {
 void
 parse_file (char *file)
 {
-    FILE *fp;
+    struct stat statbuf;
+    FILE       *fp;
+    
+    /* get the file size */
+    if (stat (file, &statbuf) != 0)
+    {
+        return;
+    }
     
     if (!(fp = fopen (file, "r")))
     {
         return;
     }
     
-    char buf[4096];
-    char *s = NULL;
-    int  alloc = 0;
-    int  len = 0;
-    int  l;
+    char  buf[4096];
+    char *data;
+    int   l;
     
+    char   *line;
+    char   *s;
     int     in_section  = 0;
     char   *key;
     char   *value;
     parse_t state       = PARSE_OK;
     
-    char *icon      = NULL;
-    int   hidden    = 0;
-    char *only_in   = NULL;
-    char *not_in    = NULL;
-    char *try_exec  = NULL;
-    char *exec      = NULL;
-    char *path      = NULL;
-    int   terminal  = 0;
+    char *icon          = NULL;
+    int   hidden        = 0;
+    char *only_in       = NULL;
+    char *not_in        = NULL;
+    char *try_exec      = NULL;
+    char *exec          = NULL;
+    char *path          = NULL;
+    int   terminal      = 0;
     
-    for (;;)
+    /* can we read the whole file in buf, or do we need to allocate memory? */
+    if (statbuf.st_size < 4)
     {
-        /* try to read line */
-        if (!fgets (buf, 4096, fp))
-        {
-            /* nothing read, but we might have something stored in s, e.g. if
-             * the last line of the file does not end with a LF */
-            if (!s)
-            {
-                break;
-            }
-            buf[0] = '\0';
-        }
+        data = buf;
+    }
+    else
+    {
+        /* +2: 1 for extra LF; 1 for NUL */
+        data = malloc (sizeof (*data) * (statbuf.st_size + 2));
+        *data = '\0';
+    }
+    fread (data, statbuf.st_size, 1, fp);
+    fclose (fp);
+    strcat (data, "\n");
+    
+    /* now do the parsing */
+    line = data;
+    while ((s = strchr (line, '\n')))
+    {
+        *s = '\0';
+        trim (line);
         
-        l = strlen (buf);
-        if (s || buf[l - 1] != '\n')
-        {
-            /* probably we couldn't read the whole line... */
-            if (alloc < len + l)
-            {
-                alloc += 1024 + l;
-                s = realloc (s, sizeof (*s) * alloc);
-                /* if this was the first alloc, make sure the string is "empty" */
-                if (len == 0)
-                {
-                    *s = '\0';
-                }
-            }
-            strcat (s, buf);
-            len += l;
-            
-            if (l > 0 && buf[l - 1] != '\n')
-            {
-                continue;
-            }
-        }
-        else
-        {
-            s = buf;
-        }
-        
-        trim (s);
         /* ignore comments & empty lines */
-        if (*s == '#' || *s == '\0')
+        if (*line == '#' || *line == '\0')
         {
-            goto clean;
+            goto next;
         }
         
         /* we only support section "Desktop Entry" */
-        if (*s == '[' && (l = strlen (s)) && s[l - 1] == ']')
+        if (*line == '[' && (l = strlen (line)) && line[l - 1] == ']')
         {
-            in_section = (strcmp ("Desktop Entry]", s + 1) == 0);
+            in_section = (strcmp ("Desktop Entry]", line + 1) == 0);
         }
         else if (in_section)
         {
-            if (!(value = strchr (s, '=')))
+            if (!(value = strchr (line, '=')))
             {
                 printf("missing =\n");
-                goto clean;
+                goto next;
             }
             
             *value = '\0';
-            key = s;
+            key = line;
             trim (key);
             ++value;
             trim (value);
@@ -177,27 +164,27 @@ parse_file (char *file)
             }
             else if (strcmp (key, "Exec") == 0)
             {
-                exec = strdup (value);
+                exec = value;
             }
             else if (strcmp (key, "TryExec") == 0)
             {
-                try_exec = strdup (value);
+                try_exec = value;
             }
             else if (strcmp (key, "OnlyShowIn") == 0)
             {
-                only_in = strdup (value);
+                only_in = value;
             }
             else if (strcmp (key, "NotShowIn") == 0)
             {
-                not_in = strdup (value);
+                not_in = value;
             }
             else if (strcmp (key, "Icon") == 0)
             {
-                icon = strdup (value);
+                icon = value;
             }
             else if (strcmp (key, "Path") == 0)
             {
-                path = strdup (value);
+                path = value;
             }
             else if (strcmp (key, "Terminal") == 0)
             {
@@ -216,21 +203,18 @@ parse_file (char *file)
                 printf("#%s=%s#\n", key, value);
             }
         }
-        
-clean:
-        if (s != buf)
-        {
-            free (s);
-            alloc = len = 0;
-        }
-        s = NULL;
-        
+next:
         if (state != PARSE_OK)
         {
             break;
         }
+        line = s + 1;
     }
-    fclose (fp);
+    
+    if (data != buf)
+    {
+        free (data);
+    }
     
     if (state == PARSE_OK || state == PARSE_ABORTED)
     {
@@ -239,7 +223,7 @@ clean:
         if (hidden)
         {
             printf("hidden\n");
-            goto done;
+            return;
         }
         
         printf("icon=%s\nonly=%s\nnot=%s\ntry=%s\nexec=%s\npath=%s\nterm=%d\n",
@@ -249,14 +233,6 @@ clean:
     {
         printf("parse failed\n");
     }
-    
-done:
-    free (icon);
-    free (only_in);
-    free (not_in);
-    free (try_exec);
-    free (exec);
-    free (path);
 }
 
 void
