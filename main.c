@@ -7,6 +7,24 @@
 #include <sys/stat.h>
 #include <ctype.h>
 
+int verbose = 1;
+
+#define LVL_ERROR       -1
+#define LVL_NORMAL      0
+#define LVL_VERBOSE     1
+#define LVL_DEBUG       2
+
+#define p(level, ...)  do {             \
+    if (level == LVL_ERROR)             \
+    {                                   \
+        fprintf (stderr, __VA_ARGS__);  \
+    }                                   \
+    else if (verbose >= level)          \
+    {                                   \
+        fprintf (stdout, __VA_ARGS__);  \
+    }                                   \
+} while (0)
+
 typedef struct
 {
     const char **dirs;
@@ -62,11 +80,13 @@ parse_file (char *file)
     /* get the file size */
     if (stat (file, &statbuf) != 0)
     {
+        p (LVL_ERROR, "%s: unable to stat file\n", file);
         return;
     }
     
     if (!(fp = fopen (file, "r")))
     {
+        p (LVL_ERROR, "%s: unable to open file\n", file);
         return;
     }
     
@@ -76,6 +96,7 @@ parse_file (char *file)
     
     char   *line;
     char   *s;
+    int     line_nb     = 0;
     int     in_section  = 0;
     char   *key;
     char   *value;
@@ -101,15 +122,19 @@ parse_file (char *file)
         data = malloc (sizeof (*data) * (statbuf.st_size + 2));
         *data = '\0';
     }
+    p (LVL_DEBUG, "read file (%d bytes)\n", statbuf.st_size);
     fread (data, statbuf.st_size, 1, fp);
     fclose (fp);
     strcat (data, "\n");
     
     /* now do the parsing */
     line = data;
+    p (LVL_DEBUG, "start parsing\n");
     while ((s = strchr (line, '\n')))
     {
         *s = '\0';
+        ++line_nb;
+        p (LVL_DEBUG, "line %d: %s\n", line_nb, line);
         line = trim (line);
         
         /* ignore comments & empty lines */
@@ -127,7 +152,8 @@ parse_file (char *file)
         {
             if (!(value = strchr (line, '=')))
             {
-                printf("missing =\n");
+                p (LVL_ERROR, "%s: syntax error (missing =) line %d\n",
+                   file, line_nb);
                 goto next;
             }
             
@@ -139,7 +165,8 @@ parse_file (char *file)
             {
                 if (strcmp (value, "Application") != 0)
                 {
-                    printf("invalid type\n");
+                    p (LVL_ERROR, "%s: invalid type line %d: %s\n",
+                       file, line_nb, value);
                     state = PARSE_FAILED;
                 }
             }
@@ -148,37 +175,44 @@ parse_file (char *file)
                 if (strcmp (value, "true") == 0)
                 {
                     hidden = 1;
-                    printf("is hidden\n");
+                    p (LVL_VERBOSE, "auto-start disabled (Hidden)\n");
                     state = PARSE_ABORTED;
                 }
                 else if (strcmp (value, "false") != 0)
                 {
-                    printf("invalid Hidden\n");
+                    p (LVL_ERROR, "%s: invalid value for %s line %d: %s\n",
+                       file, key, line_nb, value);
                     state = PARSE_FAILED;
                 }
             }
             else if (strcmp (key, "Exec") == 0)
             {
+                p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 exec = value;
             }
             else if (strcmp (key, "TryExec") == 0)
             {
+                p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 try_exec = value;
             }
             else if (strcmp (key, "OnlyShowIn") == 0)
             {
+                p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 only_in = value;
             }
             else if (strcmp (key, "NotShowIn") == 0)
             {
+                p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 not_in = value;
             }
             else if (strcmp (key, "Icon") == 0)
             {
+                p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 icon = value;
             }
             else if (strcmp (key, "Path") == 0)
             {
+                p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 path = value;
             }
             else if (strcmp (key, "Terminal") == 0)
@@ -186,25 +220,30 @@ parse_file (char *file)
                 if (strcmp (value, "true") == 0)
                 {
                     terminal = 1;
+                    p (LVL_VERBOSE, "set to be run in terminal\n");
                 }
                 else if (strcmp (value, "false") != 0)
                 {
-                    printf ("invalid Terminal\n");
+                    p (LVL_ERROR, "%s: invalid value for %s line %d: %s\n",
+                       file, key, line_nb, value);
                     state = PARSE_FAILED;
                 }
             }
-            else
-            {
-                printf("#%s=%s#\n", key, value);
-            }
+        }
+        else
+        {
+            p (LVL_DEBUG, "not in section Desktop Entry, done\n");
+            state = PARSE_ABORTED;
         }
 next:
         if (state != PARSE_OK)
         {
+            p (LVL_DEBUG, "stop parsing\n");
             break;
         }
         line = s + 1;
     }
+    p (LVL_VERBOSE, "parsing completed\n");
     
     if (data != buf)
     {
@@ -213,20 +252,14 @@ next:
     
     if (state == PARSE_OK || state == PARSE_ABORTED)
     {
-        printf("parse ok\n");
-        
         if (hidden)
         {
-            printf("hidden\n");
+            p (LVL_VERBOSE, "no auto-start to perform\n", file);
             return;
         }
         
         printf("icon=%s\nonly=%s\nnot=%s\ntry=%s\nexec=%s\npath=%s\nterm=%d\n",
                icon, only_in, not_in, try_exec, exec, path, terminal);
-    }
-    else /* if (state == PARSE_FAILED) */
-    {
-        printf("parse failed\n");
     }
 }
 
@@ -241,6 +274,7 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
     {
         if (strcmp (dirs->dirs[i], dir) == 0)
         {
+            p (LVL_VERBOSE, "%s/autostart: already processed, skip\n");
             return;
         }
     }
@@ -270,12 +304,14 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
     }
     
     len_path = strlen (path);
+    p (LVL_VERBOSE, "open folder %s\n", path);
     dp = opendir (path);
     while ((dirent = readdir (dp)))
     {
         if (!(dirent->d_type & DT_REG))
         {
             /* ignore directory, etc -- symlinks to file are NOT ignored */
+            p (LVL_DEBUG, "\n%s: not a file, ignoring\n", dirent->d_name);
             continue;
         }
 
@@ -284,6 +320,7 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
         if (l < 8 || strcmp (".desktop", &dirent->d_name[l - 8]) != 0)
         {
             /* ignore anything not .desktop */
+            p (LVL_DEBUG, "\n%s: not named *.desktop, ignoring\n", dirent->d_name);
             continue;
         }
         
@@ -301,12 +338,16 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
             if (strcmp (dirent->d_name, f->name) == 0)
             {
                 process = 0;
+                p (LVL_VERBOSE, "\n%s: name already processed, ignoring\n",
+                   dirent->d_name);
                 break;
             }
         }
         
         if (process)
         {
+            p (LVL_VERBOSE, "\n%s: processing\n", dirent->d_name);
+            
             file = malloc (sizeof (*file));
             file->name = strdup (dirent->d_name);
             file->next = NULL;
@@ -324,7 +365,6 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
                 snprintf (s2, l, "%s/%s", path, dirent->d_name);
             }
             
-            printf("%s\n", s2);
             parse_file (s2);
             
             if (s2 != buf2)
@@ -344,6 +384,7 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
             }
         }
     }
+    p (LVL_VERBOSE, "\nclosing folder\n");
     closedir (dp);
     
     if (path != buf)
@@ -364,12 +405,14 @@ main (int argc, char **argv)
     /* start with user dir */
     if (!(dir = getenv ("XDG_CONFIG_HOME")))
     {
+        p (LVL_VERBOSE, "XDG_CONFIG_HOME not set, get HOME for default value\n");
         /* not defined, use default */
         if ((s = getenv ("HOME")))
         {
             /* 8 = strlen("/.config") + 1 for NULL */
             dir = malloc (sizeof (*dir) * (strlen (s) + 9));
             sprintf (dir, "%s/.config", s);
+            p (LVL_VERBOSE, "using default: %s\n", dir);
         }
         else
         {
@@ -387,6 +430,7 @@ main (int argc, char **argv)
     /* then system wide dirs */
     if ((s = getenv ("XDG_CONFIG_DIRS-")))
     {
+        p (LVL_VERBOSE, "XDG_CONFIG_DIRS set to %s\n", s);
         dir = s = strdup (s);
         while ((ss = strchr (dir, ':')))
         {
@@ -400,10 +444,12 @@ main (int argc, char **argv)
     /* not defined, use default */
     else
     {
+        p (LVL_VERBOSE, "XDG_CONFIG_DIRS not set, using default: /etc/xdg\n");
 //        process_dir (&files, "/etc/xdg");
     }
     
     /* memory cleaning */
+    p (LVL_DEBUG, "memory cleaning\n");
     
     int i;
     for (i = 0; i < dirs.len; ++i)
