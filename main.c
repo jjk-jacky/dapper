@@ -20,34 +20,31 @@ typedef struct _files_t
     struct _files_t *next;
 } files_t;
 
-void
+char *
 trim (char *str)
 {
-    char *s, *ss;
+    char *start, *end;
     
-    for (s = str; *s == ' ' || *s == '\t'; ++s)
+    for (start = str; *start == ' ' || *start == '\t'; ++start)
         ;
-    if (s != str)
-    {
-        memmove (str, s, strlen (s) + 1); /* +1 to include NULL */
-    }
     
-    ss = NULL;
-    for (s = str; *s; ++s)
+    end = NULL;
+    for (str = start; *str; ++str)
     {
-        if (*s != ' ' && *s != '\t' && *s != '\n')
+        if (*str != ' ' && *str != '\t' && *str != '\n')
         {
-            ss = NULL;
+            end = NULL;
         }
-        else if (!ss)
+        else if (!end)
         {
-            ss = s;
+            end = str;
         }
     }
-    if (ss)
+    if (end)
     {
-        *ss = '\0';
+        *end = '\0';
     }
+    return start;
 }
 
 typedef enum {
@@ -113,7 +110,7 @@ parse_file (char *file)
     while ((s = strchr (line, '\n')))
     {
         *s = '\0';
-        trim (line);
+        line = trim (line);
         
         /* ignore comments & empty lines */
         if (*line == '#' || *line == '\0')
@@ -135,10 +132,8 @@ parse_file (char *file)
             }
             
             *value = '\0';
-            key = line;
-            trim (key);
-            ++value;
-            trim (value);
+            key = trim (line);
+            value = trim (value + 1);
             
             if (strcmp (key, "Type") == 0)
             {
