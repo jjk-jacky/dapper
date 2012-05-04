@@ -6,8 +6,10 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <ctype.h>
+#include <unistd.h>
 
-int verbose = 1;
+char *desktop = "KDE";
+int   verbose = 1;
 
 #define LVL_ERROR       -1
 #define LVL_NORMAL      0
@@ -24,6 +26,12 @@ int verbose = 1;
         fprintf (stdout, __VA_ARGS__);  \
     }                                   \
 } while (0)
+
+typedef enum {
+    PARSE_OK        = 0,
+    PARSE_ABORTED,
+    PARSE_FAILED,
+} parse_t;
 
 typedef struct
 {
@@ -65,11 +73,30 @@ trim (char *str)
     return start;
 }
 
-typedef enum {
-    PARSE_OK        = 0,
-    PARSE_ABORTED,
-    PARSE_FAILED,
-} parse_t;
+int
+is_in_list (char *name, char *items, char *item)
+{
+    int   len = strlen (items);
+    char *s;
+    
+    p (LVL_DEBUG, "[%s] searching for %s in %s\n", name, item, items);
+    
+    if (items[len - 1] != ';')
+    {
+        p (LVL_ERROR, "invalid syntax for %s\n", name);
+        return 0;
+    }
+    
+    while ((s = strchr (items, ';')))
+    {
+        if (strncmp (item, items, s - items) == 0)
+        {
+            return 1;
+        }
+        items = s + 1;
+    }
+    return 0;
+}
 
 void
 parse_file (char *file)
@@ -120,8 +147,9 @@ parse_file (char *file)
     {
         /* +2: 1 for extra LF; 1 for NUL */
         data = malloc (sizeof (*data) * (statbuf.st_size + 2));
-        *data = '\0';
     }
+    *data = '\0'; /* in case the file is empty, so strcat works */
+    data[statbuf.st_size] = '\0'; /* because fread won't put it */
     p (LVL_DEBUG, "read file (%d bytes)\n", statbuf.st_size);
     fread (data, statbuf.st_size, 1, fp);
     fclose (fp);
@@ -195,13 +223,25 @@ parse_file (char *file)
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 try_exec = value;
             }
-            else if (strcmp (key, "OnlyShowIn") == 0)
+            else if (strcmp (key, "OnlyShownIn") == 0)
             {
+                if (not_in)
+                {
+                    p (LVL_ERROR, "%s: error, OnlyShownIn and NotShownIn both defined\n",
+                       file);
+                    state = PARSE_FAILED;
+                }
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 only_in = value;
             }
-            else if (strcmp (key, "NotShowIn") == 0)
+            else if (strcmp (key, "NotShownIn") == 0)
             {
+                if (only_in)
+                {
+                    p (LVL_ERROR, "%s: error, OnlyShownIn and NotShownIn both defined\n",
+                       file);
+                    state = PARSE_FAILED;
+                }
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 not_in = value;
             }
@@ -256,6 +296,95 @@ next:
         {
             p (LVL_VERBOSE, "no auto-start to perform\n", file);
             return;
+        }
+        
+        if (desktop)
+        {
+            if (only_in && !is_in_list ("OnlyShownIn", only_in, desktop))
+            {
+                p (LVL_VERBOSE, "%s not in OnlyShownIn, no auto-start\n", desktop);
+                return;
+            }
+            else if (not_in && is_in_list ("NotShownIn", not_in, desktop))
+            {
+                p (LVL_VERBOSE, "%s in NotShownIn, no auto-start\n", desktop);
+                return;
+            }
+        }
+        else if (only_in)
+        {
+            p (LVL_ERROR, "%s: OnlyShownIn set, desktop unknown, no auto-start\n",
+               file);
+            return;
+        }
+        else if (not_in)
+        {
+            p (LVL_ERROR, "%s: NotShownIn set, desktop unknown, no auto-start\n",
+               file);
+            return;
+        }
+        
+        if (try_exec)
+        {
+            int try_state = 0;
+            
+            /* is it an absolute path or not? */
+            if (*try_exec != '/')
+            {
+                /* must search the PATH then */
+                if (!(s = getenv ("PATH")))
+                {
+                    p (LVL_VERBOSE, "%s: no PATH to find TryExec (%s), no auto-start\n",
+                       file, try_exec);
+                    return;
+                }
+                
+                char *path = strdup (s);
+                char *dir  = path;
+                
+                while ((s = strchr (dir, ':')))
+                {
+                    *s = '\0';
+                    snprintf (buf, 4096, "%s/%s", dir, try_exec);
+                    p (LVL_DEBUG, "TryExec: checking %s\n", buf);
+                    if (access (buf, F_OK | X_OK) == 0)
+                    {
+                        try_state = 1;
+                        break;
+                    }
+                    dir = s + 1;
+                }
+                if (!try_state && dir)
+                {
+                    snprintf (buf, 4096, "%s/%s", dir, try_exec);
+                    p (LVL_DEBUG, "TryExec: checking %s\n", buf);
+                    if (access (buf, F_OK | X_OK) == 0)
+                    {
+                        try_state = 1;
+                    }
+                }
+                free (path);
+            }
+            else
+            {
+                p (LVL_DEBUG, "TryExec: checking %s\n", try_exec);
+                if (access (try_exec, F_OK | X_OK) == 0)
+                {
+                    try_state = 1;
+                }
+            }
+            
+            if (try_state)
+            {
+                p (LVL_DEBUG, "TryExec: found & executable\n");
+            }
+            else
+            {
+                p (LVL_VERBOSE, "%s: unable to find executable TryExec (%s), "
+                                "no autostart\n",
+                   file, try_exec);
+                return;
+            }
         }
         
         printf("icon=%s\nonly=%s\nnot=%s\ntry=%s\nexec=%s\npath=%s\nterm=%d\n",
