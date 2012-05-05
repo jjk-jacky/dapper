@@ -111,6 +111,80 @@ unesc (char *str)
     }
 }
 
+char **
+split_exec (char *exec)
+{
+    char **argv;
+    int    alloc     = 3;
+    int    argc      = -1;
+    int    in_arg    = 0;
+    int    is_quoted = 0;
+    int    l;
+    
+    argv = calloc (alloc, sizeof (*argv));
+    for (l = strlen (exec); l; ++exec, --l)
+    {
+        if (in_arg)
+        {
+            if (is_quoted)
+            {
+                if (*exec == '\\')
+                {
+                    /* some characters needs un-escaping */
+                    if (   exec[1] == '"' || exec[1] == '`' || exec[1] == '$'
+                        || exec[1] == '\\')
+                    {
+                        --l;
+                        memmove (exec, exec + 1, l + 1);
+                    }
+                    continue;
+                }
+                else if (*exec != '"')
+                {
+                    continue;
+                }
+            }
+            else if (*exec != ' ')
+            {
+                continue;
+            }
+            
+            /* arg over */
+            *exec= '\0';
+            in_arg = 0;
+            is_quoted = 0;
+            p (LVL_DEBUG, "argv[%d]=%s\n", argc, argv[argc]);
+        }
+        else
+        {
+            /* we're looking for an arg. skip spaces, and if quoted start
+             * after the dbl-quote */
+            if (*exec != ' ')
+            {
+                in_arg = 1;
+                if (*exec == '"')
+                {
+                    is_quoted = 1;
+                    ++exec;
+                    --l;
+                }
+                if (++argc == alloc - 1)
+                {
+                    alloc += 10;
+                    argv = realloc (argv, sizeof (*argv) * alloc);
+                    memset (argv + argc + 1, '\0', 10 * sizeof (*argv));
+                }
+                argv[argc] = exec;
+            }
+        }
+    }
+    if (in_arg)
+    {
+        p (LVL_DEBUG, "argv[%d]=%s\n", argc, argv[argc]);
+    }
+    return argv;
+}
+
 int
 is_in_list (char *name, char *items, char *item)
 {
@@ -431,8 +505,28 @@ next:
             }
         }
         
-        printf("icon=%s\nonly=%s\nnot=%s\ntry=%s\nexec=%s\npath=%s\nterm=%d\n",
-               icon, only_in, not_in, try_exec, exec, path, terminal);
+        char **argv;
+        pid_t  pid;
+        
+        p (LVL_VERBOSE, "%s: triggering auto-start\n", file);
+        argv = split_exec (exec);
+        pid = fork ();
+        if (pid == 0)
+        {
+            /* child */
+            if (strcmp(icon, "foobar")==0)
+            {
+                execvp (argv[0], argv);
+            }
+            /* TODO: remove: won't be shown if parent is done first... */
+            p (LVL_ERROR, "%s: unable to start process\n", file);
+            exit (1);
+        }
+        else if (pid == -1)
+        {
+            p (LVL_ERROR, "%s: unable to fork\n", file);
+        }
+        free (argv);
     }
 }
 
