@@ -111,6 +111,123 @@ unesc (char *str)
     }
 }
 
+int
+replace_fields (char **str, char *icon, char *name, char *file)
+{
+    char *s_icon;
+    char *s_name;
+    char *s_file;
+    int   len = 0;
+    
+    s_icon = strstr (*str, "%i");
+    s_name = strstr (*str, "%c");
+    s_file = strstr (*str, "%k");
+    
+    if (s_icon)
+    {
+        if (icon)
+        {
+            /* 7 == strlen ("--icon ") */
+            len += 7 + strlen (icon);
+        }
+        else
+        {
+            memmove (s_icon, s_icon + 3, strlen (s_icon) - 2);
+        }
+    }
+    if (s_name)
+    {
+        if (name)
+        {
+            len += strlen (name);
+        }
+        else
+        {
+            memmove (s_name, s_name + 3, strlen (s_name) - 2);
+        }
+    }
+    if (s_file)
+    {
+        if (file)
+        {
+            len += strlen (file);
+        }
+        else
+        {
+            memmove (s_file, s_file + 3, strlen (s_file) - 2);
+        }
+    }
+    
+    /* nothing, or already taken care of */
+    if (len == 0)
+    {
+        return 0;
+    }
+    
+    /* we need to allocate a new memory block to put the replacement(s) in */
+    char *new;
+    char *s;
+    
+    len += strlen (*str);
+    new = malloc (sizeof (*str) * len);
+    memcpy (new, *str, strlen (*str) + 1);
+    
+    if (s_icon)
+    {
+        /* s is s_icon in new */
+        s = new + (s_icon - *str);
+        /* move s_icon past the %i */
+        s_icon += 2;
+        /* put replacement in */
+        len = strlen (icon);
+        memcpy (s, "--icon ", 7);
+        memcpy (s + 7, icon, len);
+        memcpy (s + 7 + len, s_icon, strlen (s_icon) + 1); /* +1 for NUL */
+    }
+    
+    if (s_name)
+    {
+        /* s is s_name in new */
+        s = new + (s_name - *str);
+        /* move s_name past the %c */
+        s_name += 2;
+        if (s_icon && s_icon < s_name)
+        {
+            /* replacement happened for s_icon already, we need to adjust */
+            s += 7 + strlen (icon) - 2;
+        }
+        /* put replacement */
+        len = strlen (name);
+        memcpy (s, name, len);
+        memcpy (s + len, s_name, strlen (s_name) + 1);
+    }
+    
+    if (s_file)
+    {
+        /* s is s_file in new */
+        s = new + (s_file - *str);
+        /* move s_file past the %k */
+        s_file += 2;
+        if (s_icon && s_icon < s_file)
+        {
+            /* replacement happened for s_icon already, we need to adjust */
+            s += 7 + strlen (icon) - 2;
+        }
+        if (s_name && s_name < s_file)
+        {
+            /* replacement happened for s_name already, we need to adjust */
+            s += strlen (name) - 2;
+        }
+        /* put replacement */
+        len = strlen (file);
+        memcpy (s, file, len);
+        memcpy (s + len, s_file, strlen (s_file) + 1);
+    }
+    
+    *str = new;
+    return 1;
+}
+
 char **
 split_exec (char *exec)
 {
@@ -126,6 +243,26 @@ split_exec (char *exec)
     {
         if (in_arg)
         {
+            /* field codes */
+            if (*exec == '%')
+            {
+                /* those are either deprecated or don't apply here */
+                if (   exec[1] == 'f' || exec[1] == 'F' || exec[1] == 'u'
+                    || exec[1] == 'U' || exec[1] == 'd' || exec[1] == 'D'
+                    || exec[1] == 'n' || exec[1] == 'N' || exec[1] == 'v'
+                    || exec[1] == 'm')
+                {
+                    l -= 2;
+                    memmove (exec, exec + 3, l);
+                    --exec;
+                    continue;
+                }
+                /* unknown field codes are not allowed. i, c and k were already
+                 * processed in replace_fields */
+                free (argv);
+                return NULL;
+            }
+            
             if (is_quoted)
             {
                 if (*exec == '\\')
@@ -134,8 +271,8 @@ split_exec (char *exec)
                     if (   exec[1] == '"' || exec[1] == '`' || exec[1] == '$'
                         || exec[1] == '\\')
                     {
+                        memmove (exec, exec + 1, l);
                         --l;
-                        memmove (exec, exec + 1, l + 1);
                     }
                     continue;
                 }
@@ -153,7 +290,7 @@ split_exec (char *exec)
             *exec= '\0';
             in_arg = 0;
             is_quoted = 0;
-            p (LVL_DEBUG, "argv[%d]=%s\n", argc, argv[argc]);
+            p (LVL_VERBOSE, "argv[%d]=%s\n", argc, argv[argc]);
         }
         else
         {
@@ -165,8 +302,8 @@ split_exec (char *exec)
                 if (*exec == '"')
                 {
                     is_quoted = 1;
-                    ++exec;
-                    --l;
+                    //++exec;
+                    //--l;
                 }
                 if (++argc == alloc - 1)
                 {
@@ -174,13 +311,13 @@ split_exec (char *exec)
                     argv = realloc (argv, sizeof (*argv) * alloc);
                     memset (argv + argc + 1, '\0', 10 * sizeof (*argv));
                 }
-                argv[argc] = exec;
+                argv[argc] = exec + is_quoted;
             }
         }
     }
     if (in_arg)
     {
-        p (LVL_DEBUG, "argv[%d]=%s\n", argc, argv[argc]);
+        p (LVL_VERBOSE, "argv[%d]=%s\n", argc, argv[argc]);
     }
     return argv;
 }
@@ -505,19 +642,30 @@ next:
             }
         }
         
+        char  *s;
+        int    need_free;
         char **argv;
         pid_t  pid;
         
         p (LVL_VERBOSE, "%s: triggering auto-start\n", file);
-        argv = split_exec (exec);
+        
+        s = exec;
+        need_free = replace_fields (&s, icon, NULL, file);
+        
+        if (!(argv = split_exec (s)))
+        {
+            p (LVL_ERROR, "%s: error processing command line\n", file);
+            if (need_free)
+            {
+                free (s);
+            }
+            return;
+        }
         pid = fork ();
         if (pid == 0)
         {
             /* child */
-            if (strcmp(icon, "foobar")==0)
-            {
-                execvp (argv[0], argv);
-            }
+            execvp (argv[0], argv);
             /* TODO: remove: won't be shown if parent is done first... */
             p (LVL_ERROR, "%s: unable to start process\n", file);
             exit (1);
@@ -527,6 +675,10 @@ next:
             p (LVL_ERROR, "%s: unable to fork\n", file);
         }
         free (argv);
+        if (need_free)
+        {
+            free (s);
+        }
     }
 }
 
