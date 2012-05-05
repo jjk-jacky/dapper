@@ -73,6 +73,44 @@ trim (char *str)
     return start;
 }
 
+void
+unesc (char *str)
+{
+    int l;
+    for (l = strlen (str); l; ++str, --l)
+    {
+        if (*str == '\\')
+        {
+            if (str[1] == 's')
+            {
+                *str = ' ';
+            }
+            else if (str[1] == 'n')
+            {
+                *str = '\n';
+            }
+            else if (str[1] == 't')
+            {
+                *str = '\t';
+            }
+            else if (str[1] == 'r')
+            {
+                *str = '\r';
+            }
+            else if (str[1] == '\\')
+            {
+                /* it's already a backslash, just need to memmove */
+            }
+            else
+            {
+                continue;
+            }
+            --l;
+            memmove (str + 1, str + 2, l);
+        }
+    }
+}
+
 int
 is_in_list (char *name, char *items, char *item)
 {
@@ -215,11 +253,13 @@ parse_file (char *file)
             }
             else if (strcmp (key, "Exec") == 0)
             {
+                unesc (value);
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 exec = value;
             }
             else if (strcmp (key, "TryExec") == 0)
             {
+                unesc (value);
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 try_exec = value;
             }
@@ -231,6 +271,7 @@ parse_file (char *file)
                        file);
                     state = PARSE_FAILED;
                 }
+                unesc (value);
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 only_in = value;
             }
@@ -242,16 +283,19 @@ parse_file (char *file)
                        file);
                     state = PARSE_FAILED;
                 }
+                unesc (value);
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 not_in = value;
             }
             else if (strcmp (key, "Icon") == 0)
             {
+                unesc (value);
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 icon = value;
             }
             else if (strcmp (key, "Path") == 0)
             {
+                unesc (value);
                 p (LVL_VERBOSE, "%s set to %s\n", key, value);
                 path = value;
             }
