@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 char *desktop = "KDE";
-int   verbose = 1;
+int   verbose = 2;
 
 #define LVL_ERROR       -1
 #define LVL_NORMAL      0
@@ -228,17 +228,13 @@ replace_fields (char **str, char *icon, char *name, char *file)
     return 1;
 }
 
-char **
-split_exec (char *exec)
+void
+split_exec (char *exec, int *argc, char ***argv, int *alloc)
 {
-    char **argv;
-    int    alloc     = 3;
-    int    argc      = -1;
     int    in_arg    = 0;
     int    is_quoted = 0;
     int    l;
     
-    argv = calloc (alloc, sizeof (*argv));
     for (l = strlen (exec); l; ++exec, --l)
     {
         if (in_arg)
@@ -259,8 +255,9 @@ split_exec (char *exec)
                 }
                 /* unknown field codes are not allowed. i, c and k were already
                  * processed in replace_fields */
-                free (argv);
-                return NULL;
+                free (*argv);
+                *argv = NULL;
+                return;
             }
             
             if (is_quoted)
@@ -290,7 +287,7 @@ split_exec (char *exec)
             *exec= '\0';
             in_arg = 0;
             is_quoted = 0;
-            p (LVL_VERBOSE, "argv[%d]=%s\n", argc, argv[argc]);
+            p (LVL_VERBOSE, "argv[%d]=%s\n", *argc, *argv[*argc]);
         }
         else
         {
@@ -299,27 +296,21 @@ split_exec (char *exec)
             if (*exec != ' ')
             {
                 in_arg = 1;
-                if (*exec == '"')
+                is_quoted = (*exec == '"');
+                if (++*argc >= *alloc - 1)
                 {
-                    is_quoted = 1;
-                    //++exec;
-                    //--l;
+                    *alloc += 10;
+                    *argv = realloc (*argv, sizeof (**argv) * *alloc);
+                    memset (*argv + *argc + 1, '\0', 10 * sizeof (**argv));
                 }
-                if (++argc == alloc - 1)
-                {
-                    alloc += 10;
-                    argv = realloc (argv, sizeof (*argv) * alloc);
-                    memset (argv + argc + 1, '\0', 10 * sizeof (*argv));
-                }
-                argv[argc] = exec + is_quoted;
+                *argv[*argc] = exec + is_quoted;
             }
         }
     }
     if (in_arg)
     {
-        p (LVL_VERBOSE, "argv[%d]=%s\n", argc, argv[argc]);
+        p (LVL_VERBOSE, "argv[%d]=%s\n", *argc, *argv[*argc]);
     }
-    return argv;
 }
 
 int
@@ -540,16 +531,15 @@ next:
     }
     p (LVL_VERBOSE, "parsing completed\n");
     
-    if (data != buf)
-    {
-        free (data);
-    }
-    
     if (state == PARSE_OK || state == PARSE_ABORTED)
     {
         if (hidden)
         {
             p (LVL_VERBOSE, "no auto-start to perform\n", file);
+            if (data != buf)
+            {
+                free (data);
+            }
             return;
         }
         
@@ -558,11 +548,19 @@ next:
             if (only_in && !is_in_list ("OnlyShownIn", only_in, desktop))
             {
                 p (LVL_VERBOSE, "%s not in OnlyShownIn, no auto-start\n", desktop);
+                if (data != buf)
+                {
+                    free (data);
+                }
                 return;
             }
             else if (not_in && is_in_list ("NotShownIn", not_in, desktop))
             {
                 p (LVL_VERBOSE, "%s in NotShownIn, no auto-start\n", desktop);
+                if (data != buf)
+                {
+                    free (data);
+                }
                 return;
             }
         }
@@ -570,12 +568,20 @@ next:
         {
             p (LVL_ERROR, "%s: OnlyShownIn set, desktop unknown, no auto-start\n",
                file);
+            if (data != buf)
+            {
+                free (data);
+            }
             return;
         }
         else if (not_in)
         {
             p (LVL_ERROR, "%s: NotShownIn set, desktop unknown, no auto-start\n",
                file);
+            if (data != buf)
+            {
+                free (data);
+            }
             return;
         }
         
@@ -591,18 +597,23 @@ next:
                 {
                     p (LVL_VERBOSE, "%s: no PATH to find TryExec (%s), no auto-start\n",
                        file, try_exec);
+                    if (data != buf)
+                    {
+                        free (data);
+                    }
                     return;
                 }
                 
+                char  buf2[2048];
                 char *path = strdup (s);
                 char *dir  = path;
                 
                 while ((s = strchr (dir, ':')))
                 {
                     *s = '\0';
-                    snprintf (buf, 4096, "%s/%s", dir, try_exec);
-                    p (LVL_DEBUG, "TryExec: checking %s\n", buf);
-                    if (access (buf, F_OK | X_OK) == 0)
+                    snprintf (buf2, 2048, "%s/%s", dir, try_exec);
+                    p (LVL_DEBUG, "TryExec: checking %s\n", buf2);
+                    if (access (buf2, F_OK | X_OK) == 0)
                     {
                         try_state = 1;
                         break;
@@ -611,9 +622,9 @@ next:
                 }
                 if (!try_state && dir)
                 {
-                    snprintf (buf, 4096, "%s/%s", dir, try_exec);
-                    p (LVL_DEBUG, "TryExec: checking %s\n", buf);
-                    if (access (buf, F_OK | X_OK) == 0)
+                    snprintf (buf2, 2048, "%s/%s", dir, try_exec);
+                    p (LVL_DEBUG, "TryExec: checking %s\n", buf2);
+                    if (access (buf2, F_OK | X_OK) == 0)
                     {
                         try_state = 1;
                     }
@@ -638,13 +649,19 @@ next:
                 p (LVL_VERBOSE, "%s: unable to find executable TryExec (%s), "
                                 "no autostart\n",
                    file, try_exec);
+                if (data != buf)
+                {
+                    free (data);
+                }
                 return;
             }
         }
         
         char  *s;
         int    need_free;
-        char **argv;
+        char **argv     = NULL;
+        int    argc     = -1;
+        int    alloc    = 0;
         pid_t  pid;
         
         p (LVL_VERBOSE, "%s: triggering auto-start\n", file);
@@ -652,9 +669,15 @@ next:
         s = exec;
         need_free = replace_fields (&s, icon, NULL, file);
         
-        if (!(argv = split_exec (s)))
+        split_exec (s, &argc, &argv, &alloc);
+        if (!argv)
         {
             p (LVL_ERROR, "%s: error processing command line\n", file);
+            if (data != buf)
+            {
+                free (data);
+            }
+            free (argv);
             if (need_free)
             {
                 free (s);
@@ -665,7 +688,10 @@ next:
         if (pid == 0)
         {
             /* child */
-            execvp (argv[0], argv);
+            if (strcmp(icon, "foobar")==0)
+            {
+                execvp (argv[0], argv);
+            }
             /* TODO: remove: won't be shown if parent is done first... */
             p (LVL_ERROR, "%s: unable to start process\n", file);
             exit (1);
@@ -679,6 +705,11 @@ next:
         {
             free (s);
         }
+    }
+    
+    if (data != buf)
+    {
+        free (data);
     }
 }
 
