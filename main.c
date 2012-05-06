@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 char *desktop = "KDE";
-int   verbose = 2;
+int   verbose = 1;
 
 #define LVL_ERROR       -1
 #define LVL_NORMAL      0
@@ -158,7 +158,7 @@ replace_fields (char **str, char *icon, char *name, char *file)
         }
     }
     
-    /* nothing, or already taken care of */
+    /* nothing (left) to do */
     if (len == 0)
     {
         return 0;
@@ -605,29 +605,37 @@ next:
                 }
                 
                 char  buf2[2048];
+                char *ss;
                 char *path = strdup (s);
                 char *dir  = path;
                 
-                while ((s = strchr (dir, ':')))
+                for (;;)
                 {
-                    *s = '\0';
-                    snprintf (buf2, 2048, "%s/%s", dir, try_exec);
+                    if ((s = strchr (dir, ':')))
+                    {
+                        *s = '\0';
+                    }
+                    if (*dir != '~')
+                    {
+                        ss = "";
+                    }
+                    else
+                    {
+                        ss = getenv ("HOME");
+                        ++dir;
+                    }
+                    snprintf (buf2, 2048, "%s%s/%s", ss, dir, try_exec);
                     p (LVL_DEBUG, "TryExec: checking %s\n", buf2);
                     if (access (buf2, F_OK | X_OK) == 0)
                     {
                         try_state = 1;
                         break;
                     }
-                    dir = s + 1;
-                }
-                if (!try_state && dir)
-                {
-                    snprintf (buf2, 2048, "%s/%s", dir, try_exec);
-                    p (LVL_DEBUG, "TryExec: checking %s\n", buf2);
-                    if (access (buf2, F_OK | X_OK) == 0)
+                    else if (!s)
                     {
-                        try_state = 1;
+                        break;
                     }
+                    dir = s + 1;
                 }
                 free (path);
             }
