@@ -8,8 +8,9 @@
 #include <ctype.h>
 #include <unistd.h>
 
-char *desktop = "KDE";
-int   verbose = 1;
+char *desktop  = "KDE";
+char *term_cmd = "urxvt -e";
+int   verbose  = 1;
 
 #define LVL_ERROR       -1
 #define LVL_NORMAL      0
@@ -287,7 +288,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
             *exec= '\0';
             in_arg = 0;
             is_quoted = 0;
-            p (LVL_VERBOSE, "argv[%d]=%s\n", *argc, *argv[*argc]);
+            p (LVL_VERBOSE, "argv[%d]=%s\n", *argc, (*argv)[*argc]);
         }
         else
         {
@@ -303,13 +304,13 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                     *argv = realloc (*argv, sizeof (**argv) * *alloc);
                     memset (*argv + *argc + 1, '\0', 10 * sizeof (**argv));
                 }
-                *argv[*argc] = exec + is_quoted;
+                (*argv)[*argc] = exec + is_quoted;
             }
         }
     }
     if (in_arg)
     {
-        p (LVL_VERBOSE, "argv[%d]=%s\n", *argc, *argv[*argc]);
+        p (LVL_VERBOSE, "argv[%d]=%s\n", *argc, (*argv)[*argc]);
     }
 }
 
@@ -677,6 +678,27 @@ next:
         s = exec;
         need_free = replace_fields (&s, icon, NULL, file);
         
+        if (terminal)
+        {
+            if (term_cmd)
+            {
+                split_exec (strdup(term_cmd), &argc, &argv, &alloc);
+            }
+            if (!argv)
+            {
+                p (LVL_ERROR, "%s: error with terminal command line\n", file);
+                if (data != buf)
+                {
+                    free (data);
+                }
+                if (need_free)
+                {
+                    free (s);
+                }
+                return;
+            }
+        }
+        
         split_exec (s, &argc, &argv, &alloc);
         if (!argv)
         {
@@ -685,7 +707,6 @@ next:
             {
                 free (data);
             }
-            free (argv);
             if (need_free)
             {
                 free (s);
@@ -700,8 +721,6 @@ next:
             {
                 execvp (argv[0], argv);
             }
-            /* TODO: remove: won't be shown if parent is done first... */
-            p (LVL_ERROR, "%s: unable to start process\n", file);
             exit (1);
         }
         else if (pid == -1)
