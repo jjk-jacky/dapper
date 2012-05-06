@@ -1,0 +1,8 @@
+=head1 NAME
+
+dapper - Desktop Applications Autostarter
+
+=head1 SYNOPSIS
+
+//TODO: write this...
+

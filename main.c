@@ -47,6 +47,14 @@ typedef struct _files_t
     struct _files_t *next;
 } files_t;
 
+char *trim (char *str);
+void unesc (char *str);
+int  replace_fields (char **str, char *icon, char *name, char *file);
+void split_exec (char *exec, int *argc, char ***argv, int *alloc);
+int  is_in_list (const char *name, char *items, char *item);
+void parse_file (char *file);
+void process_dir (dirs_t *dirs, files_t **files, const char *dir);
+
 char *
 trim (char *str)
 {
@@ -77,7 +85,7 @@ trim (char *str)
 void
 unesc (char *str)
 {
-    int l;
+    size_t l;
     for (l = strlen (str); l; ++str, --l)
     {
         if (*str == '\\')
@@ -115,10 +123,10 @@ unesc (char *str)
 int
 replace_fields (char **str, char *icon, char *name, char *file)
 {
-    char *s_icon;
-    char *s_name;
-    char *s_file;
-    int   len = 0;
+    char  *s_icon;
+    char  *s_name;
+    char  *s_file;
+    size_t len = 0;
     
     s_icon = strstr (*str, "%i");
     s_name = strstr (*str, "%c");
@@ -234,7 +242,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
 {
     int    in_arg    = 0;
     int    is_quoted = 0;
-    int    l;
+    size_t l;
     
     for (l = strlen (exec); l; ++exec, --l)
     {
@@ -301,7 +309,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                 if (++*argc >= *alloc - 1)
                 {
                     *alloc += 10;
-                    *argv = realloc (*argv, sizeof (**argv) * *alloc);
+                    *argv = realloc (*argv, sizeof (**argv) * (size_t) *alloc);
                     memset (*argv + *argc + 1, '\0', 10 * sizeof (**argv));
                 }
                 (*argv)[*argc] = exec + is_quoted;
@@ -315,10 +323,10 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
 }
 
 int
-is_in_list (char *name, char *items, char *item)
+is_in_list (const char *name, char *items, char *item)
 {
-    int   len = strlen (items);
-    char *s;
+    size_t len = strlen (items);
+    char  *s;
     
     p (LVL_DEBUG, "[%s] searching for %s in %s\n", name, item, items);
     
@@ -330,7 +338,7 @@ is_in_list (char *name, char *items, char *item)
     
     while ((s = strchr (items, ';')))
     {
-        if (strncmp (item, items, s - items) == 0)
+        if (strncmp (item, items, (size_t) (s - items)) == 0)
         {
             return 1;
         }
@@ -358,9 +366,9 @@ parse_file (char *file)
         return;
     }
     
-    char  buf[4096];
-    char *data;
-    int   l;
+    char   buf[4096];
+    char  *data;
+    size_t l;
     
     char   *line;
     char   *s;
@@ -387,12 +395,12 @@ parse_file (char *file)
     else
     {
         /* +2: 1 for extra LF; 1 for NUL */
-        data = malloc (sizeof (*data) * (statbuf.st_size + 2));
+        data = malloc (sizeof (*data) * (size_t) (statbuf.st_size + 2));
     }
     *data = '\0'; /* in case the file is empty, so strcat works */
     data[statbuf.st_size] = '\0'; /* because fread won't put it */
-    p (LVL_DEBUG, "read file (%d bytes)\n", statbuf.st_size);
-    fread (data, statbuf.st_size, 1, fp);
+    p (LVL_DEBUG, "read file (%lu bytes)\n", statbuf.st_size);
+    fread (data, (size_t) statbuf.st_size, 1, fp);
     fclose (fp);
     strcat (data, "\n");
     
@@ -536,7 +544,7 @@ next:
     {
         if (hidden)
         {
-            p (LVL_VERBOSE, "no auto-start to perform\n", file);
+            p (LVL_VERBOSE, "no auto-start to perform\n");
             if (data != buf)
             {
                 free (data);
@@ -607,8 +615,8 @@ next:
                 
                 char  buf2[2048];
                 char *ss;
-                char *path = strdup (s);
-                char *dir  = path;
+                char *_dir = strdup (s);
+                char *dir  = _dir;
                 
                 for (;;)
                 {
@@ -618,7 +626,7 @@ next:
                     }
                     if (*dir != '~')
                     {
-                        ss = "";
+                        ss = (char *) "";
                     }
                     else
                     {
@@ -638,7 +646,7 @@ next:
                     }
                     dir = s + 1;
                 }
-                free (path);
+                free (_dir);
             }
             else
             {
@@ -666,7 +674,6 @@ next:
             }
         }
         
-        char  *s;
         int    need_free;
         char **argv     = NULL;
         int    argc     = -1;
@@ -751,25 +758,24 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
     {
         if (strcmp (dirs->dirs[i], dir) == 0)
         {
-            p (LVL_VERBOSE, "%s/autostart: already processed, skip\n");
+            p (LVL_VERBOSE, "%s/autostart: already processed, skip\n", dir);
             return;
         }
     }
     if (dirs->len == dirs->alloc)
     {
         dirs->alloc += 10;
-        dirs->dirs = realloc (dirs->dirs, sizeof (*dirs->dirs) * dirs->alloc);
+        dirs->dirs = realloc (dirs->dirs, sizeof (*dirs->dirs) * (size_t) dirs->alloc);
     }
     dirs->dirs[dirs->len++] = strdup (dir);
     
     DIR           *dp;
     struct dirent *dirent;
     char           buf[4096];
-    int            l;
+    size_t         l;
     char          *path;
-    int            len_path;
     
-    l = snprintf (buf, 4096, "%s/autostart", dir);
+    l = (size_t) snprintf (buf, 4096, "%s/autostart", dir);
     if (l < 4096)
     {
         path = buf;
@@ -780,7 +786,6 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
         snprintf (path, l, "%s/autostart", dir);
     }
     
-    len_path = strlen (path);
     p (LVL_VERBOSE, "open folder %s\n", path);
     dp = opendir (path);
     while ((dirent = readdir (dp)))
@@ -802,7 +807,7 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
         }
         
         files_t  *f;
-        files_t  *last;
+        files_t  *last = NULL;
         files_t  *file;
         int       process;
         char     *s;
@@ -830,28 +835,27 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
             file->next = NULL;
             
             char  buf2[4096];
-            char *s2;
-            l = snprintf (buf2, 4096, "%s/%s", path, dirent->d_name);
+            l = (size_t) snprintf (buf2, 4096, "%s/%s", path, dirent->d_name);
             if (l < 4096)
             {
-                s2 = buf2;
+                s = buf2;
             }
             else
             {
-                s2 = malloc (sizeof (*s2) * (l + 1));
-                snprintf (s2, l, "%s/%s", path, dirent->d_name);
+                s = malloc (sizeof (*s) * (l + 1));
+                snprintf (s, l, "%s/%s", path, dirent->d_name);
             }
             
-            parse_file (s2);
+            parse_file (s);
             
-            if (s2 != buf2)
+            if (s != buf2)
             {
-                free (s2);
+                free (s);
             }
             
             /* if we have a list, update the next pointer of the last item (l),
              * else this becomes the first item of the list */
-            if (*files)
+            if (*files && last)
             {
                 last->next = file;
             }
