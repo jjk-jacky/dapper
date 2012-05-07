@@ -8,8 +8,8 @@
 #include <ctype.h>
 #include <unistd.h>
 
-char *desktop  = "KDE";
-char *term_cmd = "urxvt -e";
+char *desktop  = NULL;
+char *term_cmd = NULL;
 int   verbose  = 1;
 
 #define LVL_ERROR       -1
@@ -54,6 +54,7 @@ void split_exec (char *exec, int *argc, char ***argv, int *alloc);
 int  is_in_list (const char *name, char *items, char *item);
 void parse_file (char *file);
 void process_dir (dirs_t *dirs, files_t **files, const char *dir);
+void load_conf (char **data);
 
 char *
 trim (char *str)
@@ -388,7 +389,7 @@ parse_file (char *file)
     int   terminal      = 0;
     
     /* can we read the whole file in buf, or do we need to allocate memory? */
-    if (statbuf.st_size < 4)
+    if (statbuf.st_size < 4096)
     {
         data = buf;
     }
@@ -689,11 +690,12 @@ next:
         {
             if (term_cmd)
             {
-                split_exec (strdup(term_cmd), &argc, &argv, &alloc);
+                split_exec (term_cmd, &argc, &argv, &alloc);
             }
             if (!argv)
             {
-                p (LVL_ERROR, "%s: error with terminal command line\n", file);
+                p (LVL_ERROR, "%s: error with terminal command line: %s\n",
+                   file, term_cmd);
                 if (data != buf)
                 {
                     free (data);
@@ -874,14 +876,120 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
     }
 }
 
+void
+load_conf (char **data)
+{
+    const char  *home = getenv ("HOME");
+    char        *file;
+    char         buf[2048];
+    size_t       len;
+    
+    struct stat  statbuf;
+    FILE        *fp;
+    int          line_nb = 0;
+    char        *line;
+    char        *s;
+    char        *key;
+    char        *value;
+    
+    if (!home)
+        return;
+    
+    len = (size_t) snprintf (buf, 2048, "%s/.config/dapper.conf", home);
+    if (len < 2048)
+    {
+        file = buf;
+    }
+    else
+    {
+        file = malloc (sizeof (*file) * (len + 1));
+        sprintf (file, "%s/.config/dapper.conf", home);
+    }
+    
+    /* get file size, to allocate enough memory to load it all at once */
+    if (stat (file, &statbuf) != 0)
+    {
+        p (LVL_ERROR, "unable to stat conf file: %s\n", file);
+        goto clean;
+    }
+    
+    if (!(fp = fopen (file, "r")))
+    {
+        p (LVL_ERROR, "unable to open conf file: %s\n", file);
+        goto clean;
+    }
+    p (LVL_VERBOSE, "reading conf file: %s\n", file);
+    /* +2: 1 for extra LF; 1 for NUL */
+    *data = malloc (sizeof (**data) * (size_t) (statbuf.st_size + 2));
+    **data = '\0'; /* in case the file is empty, so strcat works */
+    (*data)[statbuf.st_size] = '\0'; /* because fread won't put it */
+    fread (*data, (size_t) statbuf.st_size, 1, fp);
+    fclose (fp);
+    strcat (*data, "\n");
+    
+    line = *data;
+    while ((s = strchr (line, '\n')))
+    {
+        *s = '\0';
+        ++line_nb;
+        p (LVL_DEBUG, "line %d: %s\n", line_nb, line);
+        line = trim (line);
+        
+        /* ignore comments & empty lines */
+        if (*line == '#' || *line == '\0')
+        {
+            goto next;
+        }
+        
+        if (!(value = strchr (line, '=')))
+        {
+            p (LVL_ERROR, "%s: syntax error (missing =) line %d\n",
+               file, line_nb);
+            goto next;
+        }
+        
+        *value = '\0';
+        key = trim (line);
+        value = trim (value + 1);
+        
+        if (strcmp (key, "Desktop") == 0)
+        {
+            desktop = value;
+            p (LVL_VERBOSE, "set desktop to %s\n", desktop);
+        }
+        else if (strcmp (key, "Terminal") == 0)
+        {
+            term_cmd = value;
+            p (LVL_VERBOSE, "set terminal command line prefix to: %s\n", term_cmd);
+        }
+        else
+        {
+            p (LVL_ERROR, "%s: unknown option line %d: %s\n", file, line_nb, key);
+        }
+        
+next:
+        line = s + 1;
+    }
+    p (LVL_VERBOSE, "\n");
+    
+clean:
+    if (file != buf)
+    {
+        free (file);
+    }
+}
+
 int
 main (int argc, char **argv)
 {
-    dirs_t   dirs    = { NULL, 0, 0 };
-    files_t *files   = NULL;
+    char    *data_conf  = NULL;
+    dirs_t   dirs       = { NULL, 0, 0 };
+    files_t *files      = NULL;
     char    *dir;
-    char    *s       = NULL;
+    char    *s          = NULL;
     char    *ss;
+    
+    load_conf (&data_conf);
     
     /* start with user dir */
     if (!(dir = getenv ("XDG_CONFIG_HOME")))
@@ -946,6 +1054,8 @@ main (int argc, char **argv)
         free (f->name);
         free (f);
     }
+    
+    free (data_conf);
     
     return 0;
 }

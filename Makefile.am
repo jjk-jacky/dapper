@@ -6,7 +6,6 @@ dist_doc_DATA = AUTHORS COPYING HISTORY README.md
 dist-hook:
 	cp $(srcdir)/dapper.pod $(distdir)/
 
-AM_CPPFLAGS = -DDOCDIR='"$(docdir)"'
 AM_CFLAGS = -g -std=c99 \
 		-Wall -Wextra -pedantic -Wshadow -Wpointer-arith -Wcast-align \
 		-Wwrite-strings -Wmissing-prototypes -Wmissing-declarations \
