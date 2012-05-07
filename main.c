@@ -492,12 +492,12 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
                     p (LVL_VERBOSE, "%s set to %s\n", key, value);
                     d->try_exec = value;
                 }
-                else if (strcmp (key, "OnlyShownIn") == 0)
+                else if (strcmp (key, "OnlyShowIn") == 0)
                 {
                     if (d->not_in)
                     {
                         p (LVL_ERROR,
-                           "%s: error, OnlyShownIn and NotShownIn both defined\n",
+                           "%s: error, OnlyShowIn and NotShowIn both defined\n",
                            file);
                         state = PARSE_FAILED;
                     }
@@ -505,12 +505,12 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
                     p (LVL_VERBOSE, "%s set to %s\n", key, value);
                     d->only_in = value;
                 }
-                else if (strcmp (key, "NotShownIn") == 0)
+                else if (strcmp (key, "NotShowIn") == 0)
                 {
                     if (d->only_in)
                     {
                         p (LVL_ERROR,
-                           "%s: error, OnlyShownIn and NotShownIn both defined\n",
+                           "%s: error, OnlyShowIn and NotShowIn both defined\n",
                            file);
                         state = PARSE_FAILED;
                     }
@@ -610,18 +610,18 @@ process_file (char *file)
         
         if (desktop)
         {
-            if (d.only_in && !is_in_list ("OnlyShownIn", d.only_in, desktop))
+            if (d.only_in && !is_in_list ("OnlyShowIn", d.only_in, desktop))
             {
-                p (LVL_VERBOSE, "%s not in OnlyShownIn, no auto-start\n", desktop);
+                p (LVL_VERBOSE, "%s not in OnlyShowIn, no auto-start\n", desktop);
                 if (data != buf)
                 {
                     free (data);
                 }
                 return;
             }
-            else if (d.not_in && is_in_list ("NotShownIn", d.not_in, desktop))
+            else if (d.not_in && is_in_list ("NotShowIn", d.not_in, desktop))
             {
-                p (LVL_VERBOSE, "%s in NotShownIn, no auto-start\n", desktop);
+                p (LVL_VERBOSE, "%s in NotShowIn, no auto-start\n", desktop);
                 if (data != buf)
                 {
                     free (data);
@@ -631,7 +631,7 @@ process_file (char *file)
         }
         else if (d.only_in)
         {
-            p (LVL_ERROR, "%s: OnlyShownIn set, desktop unknown, no auto-start\n",
+            p (LVL_ERROR, "%s: OnlyShowIn set, desktop unknown, no auto-start\n",
                file);
             if (data != buf)
             {
@@ -641,7 +641,7 @@ process_file (char *file)
         }
         else if (d.not_in)
         {
-            p (LVL_ERROR, "%s: NotShownIn set, desktop unknown, no auto-start\n",
+            p (LVL_ERROR, "%s: NotShowIn set, desktop unknown, no auto-start\n",
                file);
             if (data != buf)
             {
