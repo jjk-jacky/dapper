@@ -793,10 +793,7 @@ process_file (char *file)
             if (pid == 0)
             {
                 /* child */
-                if (strcmp(d.icon, "foobar")==0)
-                {
-                    execvp (argv[0], argv);
-                }
+                execvp (argv[0], argv);
                 exit (1);
             }
             else if (pid == -1)
@@ -1104,7 +1101,7 @@ main (int argc, char **argv)
     }
     
     /* then system wide dirs */
-    if ((s = getenv ("XDG_CONFIG_DIRS-")))
+    if ((s = getenv ("XDG_CONFIG_DIRS")))
     {
         p (LVL_VERBOSE, "XDG_CONFIG_DIRS set to %s\n", s);
         dir = s = strdup (s);
@@ -1121,7 +1118,7 @@ main (int argc, char **argv)
     else
     {
         p (LVL_VERBOSE, "XDG_CONFIG_DIRS not set, using default: /etc/xdg\n");
-//        process_dir (&files, "/etc/xdg");
+        process_dir (&dirs, &files, "/etc/xdg");
     }
     
     /* memory cleaning */
