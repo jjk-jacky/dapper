@@ -1,4 +1,7 @@
 
+/* for getopt_long */
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,10 +10,14 @@
 #include <sys/stat.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <getopt.h>
+
+#include "config.h"
 
 char *desktop  = NULL;
 char *term_cmd = NULL;
-int   verbose  = 1;
+int   verbose  = 0;
+int   dry_run  = 0;
 
 #define LVL_ERROR       -1
 #define LVL_NORMAL      0
@@ -68,6 +75,9 @@ parse_t parse_file (int is_desktop, char *file, char **data, size_t len_data, vo
 void process_file (char *file);
 void process_dir (dirs_t *dirs, files_t **files, const char *dir);
 int  load_conf (char **data);
+void show_help (void);
+void show_version (void);
+
 
 char *
 trim (char *str)
@@ -767,19 +777,32 @@ process_file (char *file)
             }
             return;
         }
-        pid = fork ();
-        if (pid == 0)
+        if (dry_run)
         {
-            /* child */
-            if (strcmp(d.icon, "foobar")==0)
+            char **a;
+            p (LVL_NORMAL, "auto-start: %s", argv[0]);
+            for (a = argv + 1; *a; ++a)
             {
-                execvp (argv[0], argv);
+                p (LVL_NORMAL, " %s", *a);
             }
-            exit (1);
+            p (LVL_NORMAL, "\n");
         }
-        else if (pid == -1)
+        else
         {
-            p (LVL_ERROR, "%s: unable to fork\n", file);
+            pid = fork ();
+            if (pid == 0)
+            {
+                /* child */
+                if (strcmp(d.icon, "foobar")==0)
+                {
+                    execvp (argv[0], argv);
+                }
+                exit (1);
+            }
+            else if (pid == -1)
+            {
+                p (LVL_ERROR, "%s: unable to fork\n", file);
+            }
         }
         free (argv);
         if (need_free)
@@ -959,6 +982,31 @@ load_conf (char **data)
     return ret;
 }
 
+void
+show_help ()
+{
+    fprintf (stdout, PACKAGE_NAME " - Desktop Application Starter v" PACKAGE_VERSION "\n");
+    fprintf (stdout, "\n");
+    fprintf (stdout, " -h, --help               Show this help screen and exit\n");
+    fprintf (stdout, " -V, --version            Show version information and exit\n");
+    fprintf (stdout, " -d, --desktop DESKTOP    Start applications for DESKTOP\n");
+    fprintf (stdout, " -t, --terminal CMDLINE   Use CMDLINE as prefix for terminal mode\n");
+    fprintf (stdout, " -v, --verbose            Verbose mode (twice for debug mode)\n");
+    fprintf (stdout, " -n, --dry-run            Do not start anything\n");
+    exit (0);
+}
+
+void
+show_version ()
+{
+    fprintf (stdout, PACKAGE_NAME " - Desktop Application Starter v" PACKAGE_VERSION "\n");
+    fprintf (stdout, "Copyright (C) 2012 Olivier Brunel\n");
+    fprintf (stdout, "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n");
+    fprintf (stdout, "This is free software: you are free to change and redistribute it.\n");
+    fprintf (stdout, "There is NO WARRANTY, to the extent permitted by law.\n");
+    exit (0);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -972,6 +1020,61 @@ main (int argc, char **argv)
     if (load_conf (&data_conf) == 0)
     {
         free (data_conf);
+        return 1;
+    }
+    
+    int o;
+    int index= 0;
+    struct option options[] = {
+        { "help",       no_argument,        0,  'h' },
+        { "version",    no_argument,        0,  'V' },
+        { "desktop",    required_argument,  0,  'd' },
+        { "terminal",   required_argument,  0,  't' },
+        { "verbose",    no_argument,        0,  'v' },
+        { "dry-run",    no_argument,        0,  'n' },
+        { 0,            0,                  0,    0 },
+    };
+    for (;;)
+    {
+        o = getopt_long (argc, argv, "hVd:t:vn", options, &index);
+        if (o == -1)
+        {
+            break;
+        }
+        
+        switch (o)
+        {
+            case 'h':
+                show_help ();
+                /* not reached */
+                break;
+            case 'V':
+                show_version ();
+                /* not reached */
+                break;
+            case 'd':
+                desktop = optarg;
+                p (LVL_VERBOSE, "cmdline: set desktop to %s\n", desktop);
+                break;
+            case 't':
+                term_cmd = optarg;
+                p (LVL_VERBOSE, "cmdline: set terminal command line prefix to: %s\n",
+                   term_cmd);
+                break;
+            case 'v':
+                ++verbose;
+                break;
+            case 'n':
+                dry_run = 1;
+                break;
+            case '?': /* unknown option */
+            default:
+                return 1;
+        }
+    }
+    if (optind < argc)
+    {
+        p (LVL_ERROR, "unknown argument: %s\n", argv[optind]);
         return 1;
     }
     
