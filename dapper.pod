@@ -4,5 +4,122 @@ dapper - Desktop Applications Autostarter
 
 =head1 SYNOPSIS
 
-//TODO: write this...
+B<dapper> [I<OPTION>...]
 
+=head1 OPTIONS
+
+=over
+
+=item B<-h, --help>
+
+Show a little help and exit
+
+=item B<-V, --version>
+
+Show version information and exit
+
+=item B<-d, --desktop> I<DESKTOP>
+
+Start application for I<DESKTOP>. This will be used for keys B<OnlyShowIn> and
+B<NotShowIn> to determine whether or not to perform autostart.
+If specified, this will override the value for configuration file.
+
+=item B<-t, --terminal> I<CMDLINE>
+
+Use I<CMDLINE> as prefix for terminal mode. That is, when key B<Terminal> was
+set to I<true> the command line on B<Exec> will be prefixed by the following.
+If specified, this will override the value for configuration file.
+
+=item B<-v, --verbose>
+
+Enable verbose mode. Specify twice to enable debug mode (even more verbose output).
+
+=item B<-n, --dry-run>
+
+Do not start anything, instead the command line that would be started will be
+printed on stdout.
+
+=back
+
+=head1 DESCRIPTION
+
+B<dapper> is a simple lightweight desktop application auto-starter. It will read
+I<.desktop> files in the autostart directories, all according to the FreeDesktop
+specifications (see B<NOTES>).
+
+The desktop environment applications should be started for is determined from
+configuration file (see B<CONFIGURATION> below), or through B<--desktop>
+
+The value specified will be used when keys B<OnlyShowIn> or B<NotShowIn> are
+used. If nothing desktop was specified, no autostart will be performed.
+
+For applications set to be started in terminal (via key B<Terminal>), the command
+line will be prefixed by option B<Terminal> from configuration file (see
+B<CONFIGURATION> below), or through B<--terminal>
+
+If nothing was specified, no autostart will be performed for applications to be
+run in terminal.
+
+=head1 CONFIGURATION
+
+B<dapper> will try to read configuration from a file B<~/.config/dapper.conf>
+
+This file must contain settings, in the form:
+
+Key=Value
+
+Keys are case sensitive. Spaces can be used before/after the equal sign. Empty lines and lines starting
+with a # will be ignored, the later allowing to add comments.
+
+There are no section to be defined, key/value pairs should be specified right away.
+
+Supported options are:
+
+=over
+
+=item B<Desktop>
+
+The desktop environment to start applications for; used to process keys B<OnlyShowIn>
+and B<NotShowIn>.
+
+This can be overwritten from command line using B<--desktop>
+
+=item B<Terminal>
+
+The command line prefix to use for applications marked to be run in terminal,
+through key B<Terminal>.
+
+This can be overwritten from command line using B<--terminal>
+
+=back
+
+=head1 NOTES
+
+While B<dapper> tries to follow the FreeDesktop specifications[1], the following
+limitations should be known :
+
+- Keys B<StartupNotify> and B<StartupWMClass> are not supported.
+
+- When parsing command line in B<Exec>, field code B<%c> is not supported, and
+simply removed.
+
+[1] http://standards.freedesktop.org/desktop-entry-spec/desktop-entry-spec-latest.html
+
+=head1 BUGS
+
+They're probably crawling somewhere in there... if you happen to catch one,
+(or more) report it and I'll do my best to squash it.
+
+=head1 REPOSITORY
+
+You can find the latest source code of B<dapper> as well as report bugs and/or
+suggest features on its BitBucket repository, available at
+L<https://bitbucket.org/jjacky/dapper>
+
+=head1 AUTHORS
+
+=over
+
+=item Olivier Brunel <i.am.jack.mail AT gmail DOT com>
+
+=back
