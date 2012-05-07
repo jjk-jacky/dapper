@@ -47,14 +47,27 @@ typedef struct _files_t
     struct _files_t *next;
 } files_t;
 
+typedef struct
+{
+    char *icon;
+    int   hidden;
+    char *only_in;
+    char *not_in;
+    char *try_exec;
+    char *exec;
+    char *path;
+    int   terminal;
+} desktop_t;
+
 char *trim (char *str);
 void unesc (char *str);
 int  replace_fields (char **str, char *icon, char *name, char *file);
 void split_exec (char *exec, int *argc, char ***argv, int *alloc);
 int  is_in_list (const char *name, char *items, char *item);
-void parse_file (char *file);
+parse_t parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out);
+void process_file (char *file);
 void process_dir (dirs_t *dirs, files_t **files, const char *dir);
-void load_conf (char **data);
+int  load_conf (char **data);
 
 char *
 trim (char *str)
@@ -348,8 +361,8 @@ is_in_list (const char *name, char *items, char *item)
     return 0;
 }
 
-void
-parse_file (char *file)
+parse_t
+parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
 {
     struct stat statbuf;
     FILE       *fp;
@@ -358,19 +371,17 @@ parse_file (char *file)
     if (stat (file, &statbuf) != 0)
     {
         p (LVL_ERROR, "%s: unable to stat file\n", file);
-        return;
+        return PARSE_FAILED;
     }
     
     if (!(fp = fopen (file, "r")))
     {
         p (LVL_ERROR, "%s: unable to open file\n", file);
-        return;
+        return PARSE_FAILED;
     }
     
-    char   buf[4096];
-    char  *data;
-    size_t l;
-    
+    desktop_t *d = NULL;
+    size_t  l;
     char   *line;
     char   *s;
     int     line_nb     = 0;
@@ -379,34 +390,26 @@ parse_file (char *file)
     char   *value;
     parse_t state       = PARSE_OK;
     
-    char *icon          = NULL;
-    int   hidden        = 0;
-    char *only_in       = NULL;
-    char *not_in        = NULL;
-    char *try_exec      = NULL;
-    char *exec          = NULL;
-    char *path          = NULL;
-    int   terminal      = 0;
-    
-    /* can we read the whole file in buf, or do we need to allocate memory? */
-    if (statbuf.st_size < 4096)
+    if (is_desktop)
     {
-        data = buf;
+        d = (desktop_t *) out;
     }
-    else
+    
+    /* can we read the whole file in data, or do we need to allocate memory? */
+    if ((size_t) statbuf.st_size >= len_data)
     {
         /* +2: 1 for extra LF; 1 for NUL */
-        data = malloc (sizeof (*data) * (size_t) (statbuf.st_size + 2));
+        *data = malloc (sizeof (**data) * (size_t) (statbuf.st_size + 2));
     }
-    *data = '\0'; /* in case the file is empty, so strcat works */
-    data[statbuf.st_size] = '\0'; /* because fread won't put it */
+    **data = '\0'; /* in case the file is empty, so strcat works */
+    (*data)[statbuf.st_size] = '\0'; /* because fread won't put it */
     p (LVL_DEBUG, "read file (%lu bytes)\n", statbuf.st_size);
-    fread (data, (size_t) statbuf.st_size, 1, fp);
+    fread (*data, (size_t) statbuf.st_size, 1, fp);
     fclose (fp);
-    strcat (data, "\n");
+    strcat (*data, "\n");
     
     /* now do the parsing */
-    line = data;
+    line = *data;
     p (LVL_DEBUG, "start parsing\n");
     while ((s = strchr (line, '\n')))
     {
@@ -421,12 +424,12 @@ parse_file (char *file)
             goto next;
         }
         
-        /* we only support section "Desktop Entry" */
-        if (*line == '[' && (l = strlen (line)) && line[l - 1] == ']')
+        /* .desktop file: we only support section "Desktop Entry" */
+        if (is_desktop && *line == '[' && (l = strlen (line)) && line[l - 1] == ']')
         {
             in_section = (strcmp ("Desktop Entry]", line + 1) == 0);
         }
-        else if (in_section)
+        else if (in_section || !is_desktop)
         {
             if (!(value = strchr (line, '=')))
             {
@@ -439,89 +442,118 @@ parse_file (char *file)
             key = trim (line);
             value = trim (value + 1);
             
-            if (strcmp (key, "Type") == 0)
+            if (is_desktop)
             {
-                if (strcmp (value, "Application") != 0)
+                /* .desktop file */
+                
+                if (strcmp (key, "Type") == 0)
                 {
-                    p (LVL_ERROR, "%s: invalid type line %d: %s\n",
-                       file, line_nb, value);
-                    state = PARSE_FAILED;
+                    if (strcmp (value, "Application") != 0)
+                    {
+                        p (LVL_ERROR, "%s: invalid type line %d: %s\n",
+                           file, line_nb, value);
+                        state = PARSE_FAILED;
+                    }
+                }
+                else if (strcmp (key, "Hidden") == 0)
+                {
+                    if (strcmp (value, "true") == 0)
+                    {
+                        d->hidden = 1;
+                        p (LVL_VERBOSE, "auto-start disabled (Hidden)\n");
+                        state = PARSE_ABORTED;
+                    }
+                    else if (strcmp (value, "false") != 0)
+                    {
+                        p (LVL_ERROR, "%s: invalid value for %s line %d: %s\n",
+                           file, key, line_nb, value);
+                        state = PARSE_FAILED;
+                    }
+                }
+                else if (strcmp (key, "Exec") == 0)
+                {
+                    unesc (value);
+                    p (LVL_VERBOSE, "%s set to %s\n", key, value);
+                    d->exec = value;
+                }
+                else if (strcmp (key, "TryExec") == 0)
+                {
+                    unesc (value);
+                    p (LVL_VERBOSE, "%s set to %s\n", key, value);
+                    d->try_exec = value;
+                }
+                else if (strcmp (key, "OnlyShownIn") == 0)
+                {
+                    if (d->not_in)
+                    {
+                        p (LVL_ERROR,
+                           "%s: error, OnlyShownIn and NotShownIn both defined\n",
+                           file);
+                        state = PARSE_FAILED;
+                    }
+                    unesc (value);
+                    p (LVL_VERBOSE, "%s set to %s\n", key, value);
+                    d->only_in = value;
+                }
+                else if (strcmp (key, "NotShownIn") == 0)
+                {
+                    if (d->only_in)
+                    {
+                        p (LVL_ERROR,
+                           "%s: error, OnlyShownIn and NotShownIn both defined\n",
+                           file);
+                        state = PARSE_FAILED;
+                    }
+                    unesc (value);
+                    p (LVL_VERBOSE, "%s set to %s\n", key, value);
+                    d->not_in = value;
+                }
+                else if (strcmp (key, "Icon") == 0)
+                {
+                    unesc (value);
+                    p (LVL_VERBOSE, "%s set to %s\n", key, value);
+                    d->icon = value;
+                }
+                else if (strcmp (key, "Path") == 0)
+                {
+                    unesc (value);
+                    p (LVL_VERBOSE, "%s set to %s\n", key, value);
+                    d->path = value;
+                }
+                else if (strcmp (key, "Terminal") == 0)
+                {
+                    if (strcmp (value, "true") == 0)
+                    {
+                        d->terminal = 1;
+                        p (LVL_VERBOSE, "set to be run in terminal\n");
+                    }
+                    else if (strcmp (value, "false") != 0)
+                    {
+                        p (LVL_ERROR, "%s: invalid value for %s line %d: %s\n",
+                           file, key, line_nb, value);
+                        state = PARSE_FAILED;
+                    }
                 }
             }
-            else if (strcmp (key, "Hidden") == 0)
+            else
             {
-                if (strcmp (value, "true") == 0)
+                /* dapper.conf */
+                
+                if (strcmp (key, "Desktop") == 0)
                 {
-                    hidden = 1;
-                    p (LVL_VERBOSE, "auto-start disabled (Hidden)\n");
-                    state = PARSE_ABORTED;
+                    desktop = value;
+                    p (LVL_VERBOSE, "set desktop to %s\n", desktop);
                 }
-                else if (strcmp (value, "false") != 0)
+                else if (strcmp (key, "Terminal") == 0)
                 {
-                    p (LVL_ERROR, "%s: invalid value for %s line %d: %s\n",
-                       file, key, line_nb, value);
-                    state = PARSE_FAILED;
+                    term_cmd = value;
+                    p (LVL_VERBOSE, "set terminal command line prefix to: %s\n",
+                       term_cmd);
                 }
-            }
-            else if (strcmp (key, "Exec") == 0)
-            {
-                unesc (value);
-                p (LVL_VERBOSE, "%s set to %s\n", key, value);
-                exec = value;
-            }
-            else if (strcmp (key, "TryExec") == 0)
-            {
-                unesc (value);
-                p (LVL_VERBOSE, "%s set to %s\n", key, value);
-                try_exec = value;
-            }
-            else if (strcmp (key, "OnlyShownIn") == 0)
-            {
-                if (not_in)
+                else
                 {
-                    p (LVL_ERROR, "%s: error, OnlyShownIn and NotShownIn both defined\n",
-                       file);
-                    state = PARSE_FAILED;
-                }
-                unesc (value);
-                p (LVL_VERBOSE, "%s set to %s\n", key, value);
-                only_in = value;
-            }
-            else if (strcmp (key, "NotShownIn") == 0)
-            {
-                if (only_in)
-                {
-                    p (LVL_ERROR, "%s: error, OnlyShownIn and NotShownIn both defined\n",
-                       file);
-                    state = PARSE_FAILED;
-                }
-                unesc (value);
-                p (LVL_VERBOSE, "%s set to %s\n", key, value);
-                not_in = value;
-            }
-            else if (strcmp (key, "Icon") == 0)
-            {
-                unesc (value);
-                p (LVL_VERBOSE, "%s set to %s\n", key, value);
-                icon = value;
-            }
-            else if (strcmp (key, "Path") == 0)
-            {
-                unesc (value);
-                p (LVL_VERBOSE, "%s set to %s\n", key, value);
-                path = value;
-            }
-            else if (strcmp (key, "Terminal") == 0)
-            {
-                if (strcmp (value, "true") == 0)
-                {
-                    terminal = 1;
-                    p (LVL_VERBOSE, "set to be run in terminal\n");
-                }
-                else if (strcmp (value, "false") != 0)
-                {
-                    p (LVL_ERROR, "%s: invalid value for %s line %d: %s\n",
-                       file, key, line_nb, value);
+                    p (LVL_ERROR, "%s: unknown option line %d: %s\n",
+                       file, line_nb, key);
                     state = PARSE_FAILED;
                 }
             }
@@ -540,10 +572,23 @@ next:
         line = s + 1;
     }
     p (LVL_VERBOSE, "parsing completed\n");
+    return state;
+}
+
+void
+process_file (char *file)
+{
+    char      buf[4096];
+    char     *data = buf;
+    parse_t   state;
+    desktop_t d;
+    char     *s;
     
+    memset (&d, 0, sizeof (d));
+    state = parse_file (1, file, &data, 4096, &d);
     if (state == PARSE_OK || state == PARSE_ABORTED)
     {
-        if (hidden)
+        if (d.hidden)
         {
             p (LVL_VERBOSE, "no auto-start to perform\n");
             if (data != buf)
@@ -555,7 +600,7 @@ next:
         
         if (desktop)
         {
-            if (only_in && !is_in_list ("OnlyShownIn", only_in, desktop))
+            if (d.only_in && !is_in_list ("OnlyShownIn", d.only_in, desktop))
             {
                 p (LVL_VERBOSE, "%s not in OnlyShownIn, no auto-start\n", desktop);
                 if (data != buf)
@@ -564,7 +609,7 @@ next:
                 }
                 return;
             }
-            else if (not_in && is_in_list ("NotShownIn", not_in, desktop))
+            else if (d.not_in && is_in_list ("NotShownIn", d.not_in, desktop))
             {
                 p (LVL_VERBOSE, "%s in NotShownIn, no auto-start\n", desktop);
                 if (data != buf)
@@ -574,7 +619,7 @@ next:
                 return;
             }
         }
-        else if (only_in)
+        else if (d.only_in)
         {
             p (LVL_ERROR, "%s: OnlyShownIn set, desktop unknown, no auto-start\n",
                file);
@@ -584,7 +629,7 @@ next:
             }
             return;
         }
-        else if (not_in)
+        else if (d.not_in)
         {
             p (LVL_ERROR, "%s: NotShownIn set, desktop unknown, no auto-start\n",
                file);
@@ -595,18 +640,18 @@ next:
             return;
         }
         
-        if (try_exec)
+        if (d.try_exec)
         {
             int try_state = 0;
             
             /* is it an absolute path or not? */
-            if (*try_exec != '/')
+            if (*d.try_exec != '/')
             {
                 /* must search the PATH then */
                 if (!(s = getenv ("PATH")))
                 {
                     p (LVL_VERBOSE, "%s: no PATH to find TryExec (%s), no auto-start\n",
-                       file, try_exec);
+                       file, d.try_exec);
                     if (data != buf)
                     {
                         free (data);
@@ -634,7 +679,7 @@ next:
                         ss = getenv ("HOME");
                         ++dir;
                     }
-                    snprintf (buf2, 2048, "%s%s/%s", ss, dir, try_exec);
+                    snprintf (buf2, 2048, "%s%s/%s", ss, dir, d.try_exec);
                     p (LVL_DEBUG, "TryExec: checking %s\n", buf2);
                     if (access (buf2, F_OK | X_OK) == 0)
                     {
@@ -651,8 +696,8 @@ next:
             }
             else
             {
-                p (LVL_DEBUG, "TryExec: checking %s\n", try_exec);
-                if (access (try_exec, F_OK | X_OK) == 0)
+                p (LVL_DEBUG, "TryExec: checking %s\n", d.try_exec);
+                if (access (d.try_exec, F_OK | X_OK) == 0)
                 {
                     try_state = 1;
                 }
@@ -666,7 +711,7 @@ next:
             {
                 p (LVL_VERBOSE, "%s: unable to find executable TryExec (%s), "
                                 "no autostart\n",
-                   file, try_exec);
+                   file, d.try_exec);
                 if (data != buf)
                 {
                     free (data);
@@ -683,10 +728,10 @@ next:
         
         p (LVL_VERBOSE, "%s: triggering auto-start\n", file);
         
-        s = exec;
-        need_free = replace_fields (&s, icon, NULL, file);
+        s = d.exec;
+        need_free = replace_fields (&s, d.icon, NULL, file);
         
-        if (terminal)
+        if (d.terminal)
         {
             if (term_cmd)
             {
@@ -726,7 +771,7 @@ next:
         if (pid == 0)
         {
             /* child */
-            if (strcmp(icon, "foobar")==0)
+            if (strcmp(d.icon, "foobar")==0)
             {
                 execvp (argv[0], argv);
             }
@@ -848,7 +893,7 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
                 snprintf (s, l, "%s/%s", path, dirent->d_name);
             }
             
-            parse_file (s);
+            process_file (s);
             
             if (s != buf2)
             {
@@ -876,24 +921,20 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
     }
 }
 
-void
+int
 load_conf (char **data)
 {
+    int          ret = 0;
     const char  *home = getenv ("HOME");
     char        *file;
     char         buf[2048];
     size_t       len;
     
-    struct stat  statbuf;
-    FILE        *fp;
-    int          line_nb = 0;
-    char        *line;
-    char        *s;
-    char        *key;
-    char        *value;
-    
     if (!home)
-        return;
+    {
+        p (LVL_ERROR, "cannot load configuration: unable to get HOME path\n");
+        return ret;
+    }
     
     len = (size_t) snprintf (buf, 2048, "%s/.config/dapper.conf", home);
     if (len < 2048)
@@ -906,77 +947,16 @@ load_conf (char **data)
         sprintf (file, "%s/.config/dapper.conf", home);
     }
     
-    /* get file size, to allocate enough memory to load it all at once */
-    if (stat (file, &statbuf) != 0)
-    {
-        p (LVL_ERROR, "unable to stat conf file: %s\n", file);
-        goto clean;
-    }
-    
-    if (!(fp = fopen (file, "r")))
-    {
-        p (LVL_ERROR, "unable to open conf file: %s\n", file);
-        goto clean;
-    }
-    p (LVL_VERBOSE, "reading conf file: %s\n", file);
-    /* +2: 1 for extra LF; 1 for NUL */
-    *data = malloc (sizeof (**data) * (size_t) (statbuf.st_size + 2));
-    **data = '\0'; /* in case the file is empty, so strcat works */
-    (*data)[statbuf.st_size] = '\0'; /* because fread won't put it */
-    fread (*data, (size_t) statbuf.st_size, 1, fp);
-    fclose (fp);
-    strcat (*data, "\n");
-    
-    line = *data;
-    while ((s = strchr (line, '\n')))
-    {
-        *s = '\0';
-        ++line_nb;
-        p (LVL_DEBUG, "line %d: %s\n", line_nb, line);
-        line = trim (line);
-        
-        /* ignore comments & empty lines */
-        if (*line == '#' || *line == '\0')
-        {
-            goto next;
-        }
-        
-        if (!(value = strchr (line, '=')))
-        {
-            p (LVL_ERROR, "%s: syntax error (missing =) line %d\n",
-               file, line_nb);
-            goto next;
-        }
-        
-        *value = '\0';
-        key = trim (line);
-        value = trim (value + 1);
-        
-        if (strcmp (key, "Desktop") == 0)
-        {
-            desktop = value;
-            p (LVL_VERBOSE, "set desktop to %s\n", desktop);
-        }
-        else if (strcmp (key, "Terminal") == 0)
-        {
-            term_cmd = value;
-            p (LVL_VERBOSE, "set terminal command line prefix to: %s\n", term_cmd);
-        }
-        else
-        {
-            p (LVL_ERROR, "%s: unknown option line %d: %s\n", file, line_nb, key);
-        }
-        
-next:
-        line = s + 1;
-    }
+    p (LVL_VERBOSE, "loading config from %s\n", file);
+    ret = (parse_file (0, file, data, 0, NULL) == PARSE_OK);
     p (LVL_VERBOSE, "\n");
     
-clean:
     if (file != buf)
     {
         free (file);
     }
+    
+    return ret;
 }
 
 int
@@ -989,7 +969,11 @@ main (int argc, char **argv)
     char    *s          = NULL;
     char    *ss;
     
-    load_conf (&data_conf);
+    if (load_conf (&data_conf) == 0)
+    {
+        free (data_conf);
+        return 1;
+    }
     
     /* start with user dir */
     if (!(dir = getenv ("XDG_CONFIG_HOME")))
@@ -1005,8 +989,8 @@ main (int argc, char **argv)
         }
         else
         {
-            fprintf (stderr,
-                     "XDG_CONFIG_HOME not defined, unable to get HOME for default\n");
+            p (LVL_ERROR,
+               "XDG_CONFIG_HOME not defined, unable to get HOME for default\n");
             return 1;
         }
     }
