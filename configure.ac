@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([dapper], [0.0.1], [i.am.jack.mail@gmail.com])
+AC_INIT([dapper], [0.1.0], [i.am.jack.mail@gmail.com])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AC_CONFIG_SRCDIR([main.c])
 AC_CONFIG_HEADERS([config.h])
@@ -40,4 +40,3 @@ echo "
    man pages                    : $(eval echo $(eval echo ${mandir}))
 
 "
-

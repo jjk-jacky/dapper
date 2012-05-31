@@ -45,7 +45,7 @@ printed on stdout.
 
 B<dapper> is a simple lightweight desktop application auto-starter. It will read
 I<.desktop> files in the autostart directories, all according to the FreeDesktop
-specifications (see B<NOTES>).
+specifications (see B<NOTES> below).
 
 The desktop environment applications should be started for is determined from
 configuration file (see B<CONFIGURATION> below), or through B<--desktop>
@@ -68,8 +68,9 @@ This file must contain settings, in the form:
 
 Key=Value
 
-Keys are case sensitive. Spaces can be used before/after the equal sign. Empty lines and lines starting
-with a # will be ignored, the later allowing to add comments.
+Keys are case sensitive. Spaces can be used before/after the equal sign. Empty
+lines and lines starting with a # will be ignored, the later allowing to add
+comments.
 
 There are no section to be defined, key/value pairs should be specified right away.
 
