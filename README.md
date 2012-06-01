@@ -1,6 +1,6 @@
 # dapper - Desktop Applications Autostarter
 
-dapper> is a simple lightweight desktop application auto-starter. It will read
+dapper is a simple lightweight desktop application auto-starter. It will read
 `.desktop` files in the autostart directories, all according to the [FreeDesktop
 autostart specifications](http://standards.freedesktop.org/autostart-spec/autostart-spec-latest.html
 "Desktop Application Autostart Specification").
