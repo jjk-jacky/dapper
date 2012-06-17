@@ -863,7 +863,7 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
     p (LVL_VERBOSE, "open folder %s\n", path);
     if (!(dp = opendir (path)))
     {
-        if (errno = ENOENT)
+        if (errno == ENOENT)
         {
             p (LVL_VERBOSE, "skip: %s does not exists\n", path);
         }
