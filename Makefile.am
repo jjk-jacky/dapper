@@ -1,4 +1,6 @@
 
+CLEANFILES = dapper.1
+
 bin_PROGRAMS = dapper
 nodist_man_MANS = dapper.1
 dist_doc_DATA = AUTHORS COPYING HISTORY README.md
