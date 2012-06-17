@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <errno.h>
 
 #include "config.h"
 
@@ -39,6 +40,7 @@ typedef enum {
     PARSE_OK        = 0,
     PARSE_ABORTED,
     PARSE_FAILED,
+    PARSE_FILE_NOT_FOUND,       /* mostly when reading config */
 } parse_t;
 
 typedef struct
@@ -380,6 +382,11 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
     /* get the file size */
     if (stat (file, &statbuf) != 0)
     {
+        if (errno == ENOENT)
+        {
+            p (LVL_VERBOSE, "%s: does not exists\n", file);
+            return PARSE_FILE_NOT_FOUND;
+        }
         p (LVL_ERROR, "%s: unable to stat file\n", file);
         return PARSE_FAILED;
     }
@@ -854,7 +861,22 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
     }
     
     p (LVL_VERBOSE, "open folder %s\n", path);
-    dp = opendir (path);
+    if (!(dp = opendir (path)))
+    {
+        if (errno = ENOENT)
+        {
+            p (LVL_VERBOSE, "skip: %s does not exists\n", path);
+        }
+        else
+        {
+            p (LVL_ERROR, "failed to open %s\n", path);
+        }
+        if (path != buf)
+        {
+            free (path);
+        }
+        return;
+    }
     while ((dirent = readdir (dp)))
     {
         if (!(dirent->d_type & DT_REG))
@@ -968,7 +990,8 @@ load_conf (char **data)
     }
     
     p (LVL_VERBOSE, "loading config from %s\n", file);
-    ret = (parse_file (0, file, data, 0, NULL) == PARSE_OK);
+    ret = parse_file (0, file, data, 0, NULL);
+    ret = (ret == PARSE_OK || ret == PARSE_FILE_NOT_FOUND);
     p (LVL_VERBOSE, "\n");
     
     if (file != buf)
