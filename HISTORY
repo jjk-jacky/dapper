@@ -1,4 +1,15 @@
 
+# 06/21/2012, v0.1.2
+
+- added option --system-dirs, --user-dir and --extra-dir. dapper used to always
+process user then system autostart folders. You can now define which ones to
+process, including specifying additional folders, as well as in what order.
+
+# 06/17/2012, v0.1.1
+
+- fixes a crash if the config file couldn't be opened, or a folder to be
+processed did not exist
+
 # 06/01/2012, v0.1.0
 
 - first release

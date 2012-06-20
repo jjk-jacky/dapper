@@ -18,6 +18,24 @@ Show a little help and exit
 
 Show version information and exit
 
+=item B<-s, --system-dirs>
+
+Process autostart in system folders: dapper will look for & process .desktop
+files in folder I<autostart> of each of the folders in B<XDG_CONFIG_DIRS>
+
+=item B<-u, --user-dir>
+
+Process autostart in user folder: dapper will look for & process .desktop
+files in folder I<autostart> in B<XDG_CONFIG_HOME>
+
+=item B<-e, --extra-dir> I<PATH>
+
+Process autostart in I<PATH>. dapper will look for & process .desktop
+files in specified folder. Can be specified multiple times.
+
+Note that if a specified folder is not found, no error will occur, and dapper
+will silently move on to the next folder to process, if any.
+
 =item B<-d, --desktop> I<DESKTOP>
 
 Start application for I<DESKTOP>. This will be used for keys B<OnlyShowIn> and
@@ -46,6 +64,21 @@ printed on stdout.
 B<dapper> is a simple lightweight desktop application auto-starter. It will read
 I<.desktop> files in the autostart directories, all according to the FreeDesktop
 specifications (see B<NOTES> below).
+
+dapper will process folders in the order their respective options were specified.
+
+=over
+
+=item So you can have user folder be processed first, then system folders by using:
+
+dapper --user-dir --system-dirs
+
+=item And to have system folders processed first, use:
+
+dapper -su
+
+=back
+
 
 The desktop environment applications should be started for is determined from
 configuration file (see B<CONFIGURATION> below), or through B<--desktop>
@@ -93,6 +126,15 @@ through key B<Terminal>.
 This can be overwritten from command line using B<--terminal>
 
 =back
+
+=head1 ENVIRONMENT VARIABLES
+
+When processing system folders (B<--system-dirs>), if B<XDG_CONFIG_DIRS> is not
+set, I</etc/xdg> will be used.
+
+When processing user folder (B<--user-dir>), if B<XDG_CONFIG_HOME> is not set,
+I<~/.config> will be used. If B<HOME> is not set, dapper will fail. In such a
+case, nothing will be started.
 
 =head1 NOTES
 
