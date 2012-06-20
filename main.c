@@ -874,108 +874,6 @@ add_dir (dirs_t *dirs, const char *dir, dir_type_t type)
     dirs->dirs[dirs->len++].type = type;
 }
 
-void
-process_dir (files_t **files, const char *dir)
-{
-    DIR           *dp;
-    struct dirent *dirent;
-    size_t         l;
-    
-    p (LVL_VERBOSE, "open folder %s\n", dir);
-    if (!(dp = opendir (dir)))
-    {
-        if (errno == ENOENT)
-        {
-            p (LVL_VERBOSE, "skip: %s does not exists\n", dir);
-        }
-        else
-        {
-            p (LVL_ERROR, "failed to open %s\n", dir);
-        }
-        return;
-    }
-    
-    while ((dirent = readdir (dp)))
-    {
-        if (!(dirent->d_type & DT_REG))
-        {
-            /* ignore directory, etc -- symlinks to file are NOT ignored */
-            p (LVL_DEBUG, "\n%s: not a file, ignoring\n", dirent->d_name);
-            continue;
-        }
-
-        l = strlen (dirent->d_name);
-        /* 8 == strlen (".desktop") */
-        if (l < 8 || strcmp (".desktop", &dirent->d_name[l - 8]) != 0)
-        {
-            /* ignore anything not .desktop */
-            p (LVL_DEBUG, "\n%s: not named *.desktop, ignoring\n", dirent->d_name);
-            continue;
-        }
-        
-        files_t  *f;
-        files_t  *last = NULL;
-        files_t  *file;
-        int       process;
-        char     *s;
-        
-        /* make sure we don't already have this item (from a previous dir) */
-        process = 1;
-        for (f = *files; f; f = f->next)
-        {
-            last = f;
-            if (strcmp (dirent->d_name, f->name) == 0)
-            {
-                process = 0;
-                p (LVL_VERBOSE, "\n%s: name already processed, ignoring\n",
-                   dirent->d_name);
-                break;
-            }
-        }
-        
-        if (process)
-        {
-            p (LVL_VERBOSE, "\n%s: processing\n", dirent->d_name);
-            
-            file = malloc (sizeof (*file));
-            file->name = strdup (dirent->d_name);
-            file->next = NULL;
-            
-            char  buf[4096];
-            l = (size_t) snprintf (buf, 4096, "%s/%s", dir, dirent->d_name);
-            if (l < 4096)
-            {
-                s = buf;
-            }
-            else
-            {
-                s = malloc (sizeof (*s) * (l + 1));
-                snprintf (s, l, "%s/%s", dir, dirent->d_name);
-            }
-            
-            process_file (s);
-            
-            if (s != buf)
-            {
-                free (s);
-            }
-            
-            /* if we have a list, update the next pointer of the last item (l),
-             * else this becomes the first item of the list */
-            if (*files && last)
-            {
-                last->next = file;
-            }
-            else
-            {
-                *files = file;
-            }
-        }
-    }
-    p (LVL_VERBOSE, "\nclosing folder\n");
-    closedir (dp);
-}
-
 int
 load_conf (char **data)
 {
@@ -1181,7 +1079,104 @@ main (int argc, char **argv)
     p (LVL_DEBUG, "processing folders\n");
     for (i = 0; i < dirs.len; ++i)
     {
-        process_dir (&files, dirs.dirs[i].dir);
+        DIR           *dp;
+        struct dirent *dirent;
+        size_t         l;
+
+        dir = dirs.dirs[i].dir;
+        p (LVL_VERBOSE, "open folder %s\n", dir);
+        if (!(dp = opendir (dir)))
+        {
+            if (errno == ENOENT)
+            {
+                p (LVL_VERBOSE, "skip: %s does not exists\n", dir);
+            }
+            else
+            {
+                p (LVL_ERROR, "failed to open %s\n", dir);
+            }
+            continue;
+        }
+
+        while ((dirent = readdir (dp)))
+        {
+            if (!(dirent->d_type & DT_REG))
+            {
+                /* ignore directory, etc -- symlinks to file are NOT ignored */
+                p (LVL_DEBUG, "\n%s: not a file, ignoring\n", dirent->d_name);
+                continue;
+            }
+
+            l = strlen (dirent->d_name);
+            /* 8 == strlen (".desktop") */
+            if (l < 8 || strcmp (".desktop", &dirent->d_name[l - 8]) != 0)
+            {
+                /* ignore anything not .desktop */
+                p (LVL_DEBUG, "\n%s: not named *.desktop, ignoring\n", dirent->d_name);
+                continue;
+            }
+
+            files_t  *f;
+            files_t  *last = NULL;
+            files_t  *file;
+            int       process;
+
+            /* make sure we don't already have this item (from a previous dir) */
+            process = 1;
+            for (f = files; f; f = f->next)
+            {
+                last = f;
+                if (strcmp (dirent->d_name, f->name) == 0)
+                {
+                    process = 0;
+                    p (LVL_VERBOSE, "\n%s: name already processed, ignoring\n",
+                    dirent->d_name);
+                    break;
+                }
+            }
+
+            if (process)
+            {
+                p (LVL_VERBOSE, "\n%s: processing\n", dirent->d_name);
+
+                file = malloc (sizeof (*file));
+                file->name = strdup (dirent->d_name);
+                file->next = NULL;
+
+                char  buf[4096];
+                l = (size_t) snprintf (buf, 4096, "%s/%s", dir, dirent->d_name);
+                if (l < 4096)
+                {
+                    s = buf;
+                }
+                else
+                {
+                    s = malloc (sizeof (*s) * (l + 1));
+                    snprintf (s, l, "%s/%s", dir, dirent->d_name);
+                }
+
+                process_file (s);
+
+                if (s != buf)
+                {
+                    free (s);
+                }
+
+                /* if we have a list, update the next pointer of the last item (l),
+                * else this becomes the first item of the list */
+                if (files && last)
+                {
+                    last->next = file;
+                }
+                else
+                {
+                    files = file;
+                }
+            }
+        }
+        p (LVL_VERBOSE, "\nclosing folder\n");
+        closedir (dp);
+        
         if (   dirs.dirs[i].type == DIR_ADD_SUFFIX
             || dirs.dirs[i].type == DIR_NEEDS_FREE)
         {
