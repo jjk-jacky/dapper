@@ -43,11 +43,23 @@ typedef enum {
     PARSE_FILE_NOT_FOUND,       /* mostly when reading config */
 } parse_t;
 
+typedef enum {
+    DIR_CONST = 0,      /* no suffix, no free needed */
+    DIR_ADD_SUFFIX,     /* auto-adds suffix, free when done */
+    DIR_NEEDS_FREE,     /* no suffix, but free when done */
+} dir_type_t;
+
 typedef struct
 {
-    const char **dirs;
-    int          alloc;
-    int          len;
+    char      *dir;
+    dir_type_t type;
+} dir_t;
+
+typedef struct
+{
+    dir_t  *dirs;
+    int     alloc;
+    int     len;
 } dirs_t;
 
 typedef struct _files_t
@@ -75,7 +87,8 @@ void split_exec (char *exec, int *argc, char ***argv, int *alloc);
 int  is_in_list (const char *name, char *items, char *item);
 parse_t parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out);
 void process_file (char *file);
-void process_dir (dirs_t *dirs, files_t **files, const char *dir);
+void add_dir (dirs_t *dirs, const char *dir, dir_type_t type);
+void process_dir (files_t **files, const char *dir);
 int  load_conf (char **data);
 void show_help (void);
 void show_version (void);
@@ -322,7 +335,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
             *exec= '\0';
             in_arg = 0;
             is_quoted = 0;
-            p (LVL_VERBOSE, "argv[%d]=%s\n", *argc, (*argv)[*argc]);
+            p (LVL_DEBUG, "argv[%d]=%s\n", *argc, (*argv)[*argc]);
         }
         else
         {
@@ -344,7 +357,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
     }
     if (in_arg)
     {
-        p (LVL_VERBOSE, "argv[%d]=%s\n", *argc, (*argv)[*argc]);
+        p (LVL_DEBUG, "argv[%d]=%s\n", *argc, (*argv)[*argc]);
     }
 }
 
@@ -601,6 +614,7 @@ process_file (char *file)
     desktop_t d;
     char     *s;
     
+    p (LVL_DEBUG, "processing file: %s\n", file);
     memset (&d, 0, sizeof (d));
     state = parse_file (1, file, &data, 4096, &d);
     if (state == PARSE_OK || state == PARSE_ABORTED)
@@ -822,17 +836,31 @@ process_file (char *file)
 }
 
 void
-process_dir (dirs_t *dirs, files_t **files, const char *dir)
+add_dir (dirs_t *dirs, const char *dir, dir_type_t type)
 {
-    int i;
+    int     i;
+    size_t  l;
+    char   *s;
     
-    /* make sure this dir hasn't been processed already. This is in case e.g.
-     * XDG_CONFIG_DIRS was set to /etc/xdg:/etc/xdg:/etc/xdg */
+    if (type == DIR_ADD_SUFFIX)
+    {
+        l = strlen (dir);
+        /* 11 = strlen("/autostart") + 1 for NULL */
+        s = malloc (sizeof (*s) * (l + 11));
+        sprintf (s, "%s%sautostart", dir, dir[l-1] == '/' ? "" : "/");
+        dir = s;
+    }
+    
+    /* make sure this dir hasn't been processed already */
     for (i = 0; i < dirs->len; ++i)
     {
-        if (strcmp (dirs->dirs[i], dir) == 0)
+        if (strcmp (dirs->dirs[i].dir, dir) == 0)
         {
-            p (LVL_VERBOSE, "%s/autostart: already processed, skip\n", dir);
+            p (LVL_DEBUG, "%s: already listed, skipping\n", dir);
+            if (type == DIR_ADD_SUFFIX || type == DIR_NEEDS_FREE)
+            {
+                free ((char *) dir);
+            }
             return;
         }
     }
@@ -841,42 +869,32 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
         dirs->alloc += 10;
         dirs->dirs = realloc (dirs->dirs, sizeof (*dirs->dirs) * (size_t) dirs->alloc);
     }
-    dirs->dirs[dirs->len++] = strdup (dir);
-    
+    p (LVL_DEBUG, "adding folder: %s\n", dir);
+    dirs->dirs[dirs->len].dir = (char *) dir;
+    dirs->dirs[dirs->len++].type = type;
+}
+
+void
+process_dir (files_t **files, const char *dir)
+{
     DIR           *dp;
     struct dirent *dirent;
-    char           buf[4096];
     size_t         l;
-    char          *path;
     
-    l = (size_t) snprintf (buf, 4096, "%s/autostart", dir);
-    if (l < 4096)
-    {
-        path = buf;
-    }
-    else
-    {
-        path = malloc (sizeof (*path) * (l + 1));
-        snprintf (path, l, "%s/autostart", dir);
-    }
-    
-    p (LVL_VERBOSE, "open folder %s\n", path);
-    if (!(dp = opendir (path)))
+    p (LVL_VERBOSE, "open folder %s\n", dir);
+    if (!(dp = opendir (dir)))
     {
         if (errno == ENOENT)
         {
-            p (LVL_VERBOSE, "skip: %s does not exists\n", path);
+            p (LVL_VERBOSE, "skip: %s does not exists\n", dir);
         }
         else
         {
-            p (LVL_ERROR, "failed to open %s\n", path);
-        }
-        if (path != buf)
-        {
-            free (path);
+            p (LVL_ERROR, "failed to open %s\n", dir);
         }
         return;
     }
+    
     while ((dirent = readdir (dp)))
     {
         if (!(dirent->d_type & DT_REG))
@@ -923,21 +941,21 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
             file->name = strdup (dirent->d_name);
             file->next = NULL;
             
-            char  buf2[4096];
-            l = (size_t) snprintf (buf2, 4096, "%s/%s", path, dirent->d_name);
+            char  buf[4096];
+            l = (size_t) snprintf (buf, 4096, "%s/%s", dir, dirent->d_name);
             if (l < 4096)
             {
-                s = buf2;
+                s = buf;
             }
             else
             {
                 s = malloc (sizeof (*s) * (l + 1));
-                snprintf (s, l, "%s/%s", path, dirent->d_name);
+                snprintf (s, l, "%s/%s", dir, dirent->d_name);
             }
             
             process_file (s);
             
-            if (s != buf2)
+            if (s != buf)
             {
                 free (s);
             }
@@ -956,11 +974,6 @@ process_dir (dirs_t *dirs, files_t **files, const char *dir)
     }
     p (LVL_VERBOSE, "\nclosing folder\n");
     closedir (dp);
-    
-    if (path != buf)
-    {
-        free (path);
-    }
 }
 
 int
@@ -1005,21 +1018,24 @@ load_conf (char **data)
 void
 show_help ()
 {
-    fprintf (stdout, PACKAGE_NAME " - Desktop Application Starter v" PACKAGE_VERSION "\n");
+    fprintf (stdout, PACKAGE_NAME " - Desktop Applications Autostarter v" PACKAGE_VERSION "\n");
     fprintf (stdout, "\n");
     fprintf (stdout, " -h, --help               Show this help screen and exit\n");
     fprintf (stdout, " -V, --version            Show version information and exit\n");
+    fprintf (stdout, " -s, --system-dirs        Process autostart from system folders\n");
+    fprintf (stdout, " -u, --user-dir           Process autostart from user folder\n");
+    fprintf (stdout, " -e, --extra-dir PATH     Process autostart from PATH\n");
     fprintf (stdout, " -d, --desktop DESKTOP    Start applications for DESKTOP\n");
     fprintf (stdout, " -t, --terminal CMDLINE   Use CMDLINE as prefix for terminal mode\n");
     fprintf (stdout, " -v, --verbose            Verbose mode (twice for debug mode)\n");
-    fprintf (stdout, " -n, --dry-run            Do not start anything\n");
+    fprintf (stdout, " -n, --dry-run            Do not actually start anything\n");
     exit (0);
 }
 
 void
 show_version ()
 {
-    fprintf (stdout, PACKAGE_NAME " - Desktop Application Starter v" PACKAGE_VERSION "\n");
+    fprintf (stdout, PACKAGE_NAME " - Desktop Applications Autostarter v" PACKAGE_VERSION "\n");
     fprintf (stdout, "Copyright (C) 2012 Olivier Brunel\n");
     fprintf (stdout, "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n");
     fprintf (stdout, "This is free software: you are free to change and redistribute it.\n");
@@ -1046,17 +1062,20 @@ main (int argc, char **argv)
     int o;
     int index= 0;
     struct option options[] = {
-        { "help",       no_argument,        0,  'h' },
-        { "version",    no_argument,        0,  'V' },
-        { "desktop",    required_argument,  0,  'd' },
-        { "terminal",   required_argument,  0,  't' },
-        { "verbose",    no_argument,        0,  'v' },
-        { "dry-run",    no_argument,        0,  'n' },
-        { 0,            0,                  0,    0 },
+        { "help",           no_argument,        0,  'h' },
+        { "version",        no_argument,        0,  'V' },
+        { "system-dirs",    no_argument,        0,  's' },
+        { "user-dir",       no_argument,        0,  'u' },
+        { "extra-dir",      required_argument,  0,  'e' },
+        { "desktop",        required_argument,  0,  'd' },
+        { "terminal",       required_argument,  0,  't' },
+        { "verbose",        no_argument,        0,  'v' },
+        { "dry-run",        no_argument,        0,  'n' },
+        { 0,                0,                  0,    0 },
     };
     for (;;)
     {
-        o = getopt_long (argc, argv, "hVd:t:vn", options, &index);
+        o = getopt_long (argc, argv, "hVsue:d:t:vn", options, &index);
         if (o == -1)
         {
             break;
@@ -1071,6 +1090,59 @@ main (int argc, char **argv)
             case 'V':
                 show_version ();
                 /* not reached */
+                break;
+            case 'u':
+                p (LVL_DEBUG, "add user dir\n");
+                if ((dir = getenv ("XDG_CONFIG_HOME")))
+                {
+                    add_dir (&dirs, dir, DIR_ADD_SUFFIX);
+                }
+                else
+                {
+                    p (LVL_VERBOSE, "XDG_CONFIG_HOME not set, get HOME for default value\n");
+                    /* not defined, use default */
+                    if ((s = getenv ("HOME")))
+                    {
+                        /* 19 = strlen("/.config/autostart") + 1 for NULL */
+                        dir = malloc (sizeof (*dir) * (strlen (s) + 19));
+                        sprintf (dir, "%s/.config/autostart", s);
+                        p (LVL_VERBOSE, "using default: %s\n", dir);
+                        add_dir (&dirs, dir, DIR_NEEDS_FREE);
+                        free (dir);
+                    }
+                    else
+                    {
+                        p (LVL_ERROR,
+                           "XDG_CONFIG_HOME not defined, unable to get HOME for default\n");
+                        return 1;
+                    }
+                }
+                break;
+            case 's':
+                p (LVL_DEBUG, "add system dirs\n");
+                if ((s = getenv ("XDG_CONFIG_DIRS")))
+                {
+                    p (LVL_VERBOSE, "XDG_CONFIG_DIRS set to %s\n", s);
+                    dir = s = strdup (s);
+                    while ((ss = strchr (dir, ':')))
+                    {
+                        *ss = '\0';
+                        add_dir (&dirs, dir, DIR_ADD_SUFFIX);
+                        dir = ss + 1;
+                    }
+                    add_dir (&dirs, dir, DIR_ADD_SUFFIX);
+                    free (s);
+                }
+                /* not defined, use default */
+                else
+                {
+                    p (LVL_VERBOSE, "XDG_CONFIG_DIRS not set, using default: /etc/xdg\n");
+                    add_dir (&dirs, "/etc/xdg/autostart", DIR_CONST);
+                }
+                break;
+            case 'e':
+                p (LVL_DEBUG, "add extra dir: %s\n", optarg);
+                add_dir (&dirs, optarg, DIR_CONST);
                 break;
             case 'd':
                 desktop = optarg;
@@ -1098,61 +1170,28 @@ main (int argc, char **argv)
         return 1;
     }
     
-    /* start with user dir */
-    if (!(dir = getenv ("XDG_CONFIG_HOME")))
+    if (dirs.len == 0)
     {
-        p (LVL_VERBOSE, "XDG_CONFIG_HOME not set, get HOME for default value\n");
-        /* not defined, use default */
-        if ((s = getenv ("HOME")))
-        {
-            /* 8 = strlen("/.config") + 1 for NULL */
-            dir = malloc (sizeof (*dir) * (strlen (s) + 9));
-            sprintf (dir, "%s/.config", s);
-            p (LVL_VERBOSE, "using default: %s\n", dir);
-        }
-        else
-        {
-            p (LVL_ERROR,
-               "XDG_CONFIG_HOME not defined, unable to get HOME for default\n");
-            return 1;
-        }
-    }
-    process_dir (&dirs, &files, (const char *) dir);
-    if (s)
-    {
-        free (dir);
+        show_help ();
+        /* not reached */
+        return 1;
     }
     
-    /* then system wide dirs */
-    if ((s = getenv ("XDG_CONFIG_DIRS")))
+    int i;
+    p (LVL_DEBUG, "processing folders\n");
+    for (i = 0; i < dirs.len; ++i)
     {
-        p (LVL_VERBOSE, "XDG_CONFIG_DIRS set to %s\n", s);
-        dir = s = strdup (s);
-        while ((ss = strchr (dir, ':')))
+        process_dir (&files, dirs.dirs[i].dir);
+        if (   dirs.dirs[i].type == DIR_ADD_SUFFIX
+            || dirs.dirs[i].type == DIR_NEEDS_FREE)
         {
-            *ss = '\0';
-            process_dir (&dirs, &files, dir);
-            dir = ss + 1;
+            free ((void *) dirs.dirs[i].dir);
         }
-        process_dir (&dirs, &files, dir);
-        free (s);
     }
-    /* not defined, use default */
-    else
-    {
-        p (LVL_VERBOSE, "XDG_CONFIG_DIRS not set, using default: /etc/xdg\n");
-        process_dir (&dirs, &files, "/etc/xdg");
-    }
+    free (dirs.dirs);
     
     /* memory cleaning */
     p (LVL_DEBUG, "memory cleaning\n");
-    
-    int i;
-    for (i = 0; i < dirs.len; ++i)
-    {
-        free ((void *) dirs.dirs[i]);
-    }
-    free (dirs.dirs);
     
     files_t *f, *ff;
     for (f = files; f; f = ff)
