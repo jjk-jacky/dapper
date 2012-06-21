@@ -87,7 +87,7 @@ void split_exec (char *exec, int *argc, char ***argv, int *alloc);
 int  is_in_list (const char *name, char *items, char *item);
 parse_t parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out);
 void process_file (char *file);
-void add_dir (dirs_t *dirs, const char *dir, dir_type_t type);
+void add_dir (dirs_t *dirs, char *dir, dir_type_t type);
 void process_dir (files_t **files, const char *dir);
 int  load_conf (char **data);
 void show_help (void);
@@ -166,6 +166,7 @@ replace_fields (char **str, char *icon, char *name, char *file)
     char  *s_name;
     char  *s_file;
     size_t len = 0;
+    size_t l;
     
     s_icon = strstr (*str, "%i");
     s_name = strstr (*str, "%c");
@@ -180,7 +181,15 @@ replace_fields (char **str, char *icon, char *name, char *file)
         }
         else
         {
-            memmove (s_icon, s_icon + 3, strlen (s_icon) - 2);
+            l = strlen (s_icon) - 2;
+            if (l)
+            {
+                memmove (s_icon, s_icon + 3, l);
+            }
+            else
+            {
+                *s_icon = '\0';
+            }
         }
     }
     if (s_name)
@@ -191,7 +200,15 @@ replace_fields (char **str, char *icon, char *name, char *file)
         }
         else
         {
-            memmove (s_name, s_name + 3, strlen (s_name) - 2);
+            l = strlen (s_name) - 2;
+            if (l)
+            {
+                memmove (s_name, s_name + 3, l);
+            }
+            else
+            {
+                *s_name = '\0';
+            }
         }
     }
     if (s_file)
@@ -202,7 +219,15 @@ replace_fields (char **str, char *icon, char *name, char *file)
         }
         else
         {
-            memmove (s_file, s_file + 3, strlen (s_file) - 2);
+            l = strlen (s_file) - 2;
+            if (l)
+            {
+                memmove (s_file, s_file + 3, l);
+            }
+            else
+            {
+                *s_file = '\0';
+            }
         }
     }
     
@@ -283,7 +308,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
     int    is_quoted = 0;
     size_t l;
     
-    for (l = strlen (exec); l; ++exec, --l)
+    for (l = strlen (exec) + 1; l > 0 && --l; ++exec)
     {
         if (in_arg)
         {
@@ -297,7 +322,14 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                     || exec[1] == 'm')
                 {
                     l -= 2;
-                    memmove (exec, exec + 3, l);
+                    if (l)
+                    {
+                        memmove (exec, exec + 3, l);
+                    }
+                    else
+                    {
+                        *exec = '\0';
+                    }
                     --exec;
                     continue;
                 }
@@ -352,6 +384,8 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                     memset (*argv + *argc + 1, '\0', 10 * sizeof (**argv));
                 }
                 (*argv)[*argc] = exec + is_quoted;
+                --exec;
+                ++l;
             }
         }
     }
@@ -836,19 +870,29 @@ process_file (char *file)
 }
 
 void
-add_dir (dirs_t *dirs, const char *dir, dir_type_t type)
+add_dir (dirs_t *dirs, char *dir, dir_type_t type)
 {
     int     i;
     size_t  l;
     char   *s;
     
+    l = strlen (dir);
     if (type == DIR_ADD_SUFFIX)
     {
-        l = strlen (dir);
-        /* 11 = strlen("/autostart") + 1 for NULL */
+        /* 11 = strlen ("/autostart") + 1 for NULL */
         s = malloc (sizeof (*s) * (l + 11));
-        sprintf (s, "%s%sautostart", dir, dir[l-1] == '/' ? "" : "/");
+        sprintf (s, "%s%sautostart", dir, dir[l - 1] == '/' ? "" : "/");
+        if (dir[l - 1] != '/')
+        {
+            ++l;
+        }
+        l += 9; /* 9 = strlen ("autostart") */
         dir = s;
+    }
+    
+    if (l && dir[l - 1] == '/')
+    {
+        dir[l - 1] = '\0';
     }
     
     /* make sure this dir hasn't been processed already */
@@ -1035,7 +1079,7 @@ main (int argc, char **argv)
                 else
                 {
                     p (LVL_VERBOSE, "XDG_CONFIG_DIRS not set, using default: /etc/xdg\n");
-                    add_dir (&dirs, "/etc/xdg/autostart", DIR_CONST);
+                    add_dir (&dirs, (char *) "/etc/xdg/autostart", DIR_CONST);
                 }
                 break;
             case 'e':
