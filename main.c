@@ -329,6 +329,8 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                     else
                     {
                         *exec = '\0';
+                        in_arg = 0;
+                        is_quoted = 0;
                     }
                     --exec;
                     continue;
