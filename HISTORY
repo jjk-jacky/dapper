@@ -5,6 +5,8 @@
 process user then system autostart folders. You can now define which ones to
 process, including specifying additional folders, as well as in what order.
 
+- parsing fields was actually quite buggy/not working, fixed
+
 # 06/17/2012, v0.1.1
 
 - fixes a crash if the config file couldn't be opened, or a folder to be
