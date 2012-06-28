@@ -79,6 +79,8 @@ dapper -su
 
 =back
 
+See B<ORDER AND PRECEDENCE> below for implications on what will be started.
+
 
 The desktop environment applications should be started for is determined from
 configuration file (see B<CONFIGURATION> below), or through B<--desktop>
@@ -135,6 +137,37 @@ set, I</etc/xdg> will be used.
 When processing user folder (B<--user-dir>), if B<XDG_CONFIG_HOME> is not set,
 I<~/.config> will be used. If B<HOME> is not set, dapper will fail. In such a
 case, nothing will be started.
+
+=head1 ORDER AND PRECEDENCE
+
+Specifications state that when a I<.desktop> file by the same name if present in both
+user & system folders, the user one takes precedence over the system one, thus allowing
+user to be able to "disable" system autostarts.
+
+The way dapper handles this is based on the order in which folders are processed,
+specifically whichever file is processed first takes precedence.
+
+=over
+
+=item This means that for a standard autostart, where user files take precedence, you should
+use:
+
+dapper --user-dir --system-dirs
+
+=back
+
+Having system folder(s) be processed first will result in the opposite, and system
+definitions taking precedence over user ones.
+
+=over
+
+=item The same applies for additional folders (B<--extra-dir>), so e.g. to have user files
+have precedence over both system ones and extra ones, while extra ones take precedence
+over system ones, use:
+
+dapper --user-dir --extra-dir /path/ --system-dirs
+
+=back
 
 =head1 NOTES
 
