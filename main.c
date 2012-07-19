@@ -301,11 +301,28 @@ replace_fields (char **str, char *icon, char *name, char *file)
     return 1;
 }
 
+/* if the argument was nothing but a field code, we shouldn't send anything,
+ * as opposed to send an empty string as argument (which might cause problems,
+ * or unexpected behaviors, with some apps. E.g. a file manager or browser
+ * would open a new tab in the "current" folder or something...) */
+#define close_arg() do {                                        \
+    if (had_field_code && (*argv)[*argc][0] == '\0')            \
+    {                                                           \
+        (*argv)[*argc] = NULL;                                  \
+        --*argc;                                                \
+    }                                                           \
+    else                                                        \
+    {                                                           \
+        p (LVL_DEBUG, "argv[%d]=%s\n", *argc, (*argv)[*argc]);  \
+    }                                                           \
+} while (0)
+
 void
 split_exec (char *exec, int *argc, char ***argv, int *alloc)
 {
     int    in_arg    = 0;
     int    is_quoted = 0;
+    int    had_field_code = 0;
     size_t l;
     
     for (l = strlen (exec) + 1; l > 0 && --l; ++exec)
@@ -321,16 +338,18 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                     || exec[1] == 'n' || exec[1] == 'N' || exec[1] == 'v'
                     || exec[1] == 'm')
                 {
-                    l -= 2;
+                    had_field_code = 1;
+                    --l;
                     if (l)
                     {
-                        memmove (exec, exec + 3, l);
+                        memmove (exec, exec + 2, l + 1);
                     }
                     else
                     {
                         *exec = '\0';
                         in_arg = 0;
                         is_quoted = 0;
+                        close_arg ();
                     }
                     --exec;
                     continue;
@@ -369,7 +388,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
             *exec= '\0';
             in_arg = 0;
             is_quoted = 0;
-            p (LVL_DEBUG, "argv[%d]=%s\n", *argc, (*argv)[*argc]);
+            close_arg ();
         }
         else
         {
@@ -379,6 +398,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
             {
                 in_arg = 1;
                 is_quoted = (*exec == '"');
+                had_field_code = 0;
                 if (++*argc >= *alloc - 1)
                 {
                     *alloc += 10;
@@ -386,14 +406,17 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                     memset (*argv + *argc + 1, '\0', 10 * sizeof (**argv));
                 }
                 (*argv)[*argc] = exec + is_quoted;
-                --exec;
-                ++l;
+                if (!is_quoted)
+                {
+                    --exec;
+                    ++l;
+                }
             }
         }
     }
     if (in_arg)
     {
-        p (LVL_DEBUG, "argv[%d]=%s\n", *argc, (*argv)[*argc]);
+        close_arg ();
     }
 }
 
