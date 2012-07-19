@@ -140,7 +140,7 @@ case, nothing will be started.
 
 =head1 ORDER AND PRECEDENCE
 
-Specifications state that when a I<.desktop> file by the same name if present in both
+Specifications state that when a I<.desktop> file by the same name is present in both
 user & system folders, the user one takes precedence over the system one, thus allowing
 user to be able to "disable" system autostarts.
 
