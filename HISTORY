@@ -1,4 +1,12 @@
 
+# 07/22/2012, v0.1.3
+
+- added information about order & precedence in man page
+
+- when an argument was only a field code, an empty string was sent instead of nothing.
+This could lead to unexpected results for some applications (such as file managers or
+web browsers, where e.g. new tab could be opened...); fixed.
+
 # 06/21/2012, v0.1.2
 
 - added option --system-dirs, --user-dir and --extra-dir. dapper used to always
