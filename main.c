@@ -322,6 +322,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
 {
     int    in_arg    = 0;
     int    is_quoted = 0;
+    char   quote;
     int    had_field_code = 0;
     size_t l;
     
@@ -374,7 +375,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                     }
                     continue;
                 }
-                else if (*exec != '"')
+                else if (*exec != quote)
                 {
                     continue;
                 }
@@ -397,7 +398,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
             if (*exec != ' ')
             {
                 in_arg = 1;
-                is_quoted = (*exec == '"');
+                is_quoted = (*exec == '"' || *exec == '\'');
                 had_field_code = 0;
                 if (++*argc >= *alloc - 1)
                 {
@@ -406,7 +407,11 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                     memset (*argv + *argc + 1, '\0', 10 * sizeof (**argv));
                 }
                 (*argv)[*argc] = exec + is_quoted;
-                if (!is_quoted)
+                if (is_quoted)
+                {
+                    quote = *exec;
+                }
+                else
                 {
                     --exec;
                     ++l;
