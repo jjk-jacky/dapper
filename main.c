@@ -80,28 +80,14 @@ typedef struct
     int   terminal;
 } desktop_t;
 
-char *trim (char *str);
-void unesc (char *str);
-int  replace_fields (char **str, char *icon, char *name, char *file);
-void split_exec (char *exec, int *argc, char ***argv, int *alloc);
-int  is_in_list (const char *name, char *items, char *item);
-parse_t parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out);
-void process_file (char *file);
-void add_dir (dirs_t *dirs, char *dir, dir_type_t type);
-void process_dir (files_t **files, const char *dir);
-int  load_conf (char **data);
-void show_help (void);
-void show_version (void);
-
-
-char *
+static char *
 trim (char *str)
 {
     char *start, *end;
-    
+
     for (start = str; *start == ' ' || *start == '\t'; ++start)
         ;
-    
+
     end = NULL;
     for (str = start; *str; ++str)
     {
@@ -121,7 +107,7 @@ trim (char *str)
     return start;
 }
 
-void
+static void
 unesc (char *str)
 {
     size_t l;
@@ -159,146 +145,90 @@ unesc (char *str)
     }
 }
 
-int
+static int
 replace_fields (char **str, char *icon, char *name, char *file)
 {
-    char  *s_icon;
-    char  *s_name;
-    char  *s_file;
-    size_t len = 0;
-    size_t l;
-    
-    s_icon = strstr (*str, "%i");
-    s_name = strstr (*str, "%c");
-    s_file = strstr (*str, "%k");
-    
-    if (s_icon)
+    const char *replacement[] = {
+        "~",    getenv ("HOME"),
+        "%i",   icon,
+        "%c",   name,
+        "%k",   file,
+        NULL
+    };
+    char    *new        = *str;
+    size_t   alloc      = 0;
+    size_t   len        = strlen (*str);
+    int      need_free  = 0;
+
+    const char **r;
+    for (r = replacement; r && *r; r += 2)
     {
-        if (icon)
+        for (;;)
         {
-            /* 7 == strlen ("--icon ") */
-            len += 7 + strlen (icon);
-        }
-        else
-        {
-            l = strlen (s_icon) - 2;
-            if (l)
+            char *s = strstr (new, r[0]);
+            if (!s)
             {
-                memmove (s_icon, s_icon + 3, l);
+                break;
+            }
+            if (r[1])
+            {
+                /* replace */
+                size_t len_fnd = strlen (r[0]);
+                size_t len_rep = strlen (r[1]);
+                size_t l;
+
+                /* icon is a special case, w/ a prefix */
+                if (r[1] == icon)
+                {
+                    len_rep += 7; /* 7 == strlen ("--icon ") */
+                }
+                l = len_rep - len_fnd;
+
+                if (!need_free || alloc - len < l)
+                {
+                    alloc += l + 255;
+                    new = realloc ((need_free) ? new : NULL,
+                            sizeof (*new) * (alloc + 1));
+                    if (!need_free)
+                    {
+                        need_free = 1;
+                        memcpy (new, *str, len + 1 /* for NULL */);
+                    }
+                    s = strstr (new, r[0]);
+                }
+                /* put the bit after the replacement in */
+                memmove (s + len_rep,
+                        s + len_fnd,
+                        strlen (s + len_fnd) + 1);
+                /* and now the replacement itself */
+                if (r[1] == icon)
+                {
+                    memcpy (s, "--icon ", 7);
+                    memcpy (s + 7, r[1], len_rep - 7);
+                }
+                else
+                {
+                    memcpy (s, r[1], len_rep);
+                }
+                /* adjust len */
+                len += l;
             }
             else
             {
-                *s_icon = '\0';
+                /* remove */
+                size_t l = strlen (r[0]);
+                if (*(s + l) == ' ')
+                {
+                    ++l;
+                }
+                memmove (s, s + l, strlen (s + l) + 1 /* for NULL */);
+                len -= l;
             }
         }
     }
-    if (s_name)
-    {
-        if (name)
-        {
-            len += strlen (name);
-        }
-        else
-        {
-            l = strlen (s_name) - 2;
-            if (l)
-            {
-                memmove (s_name, s_name + 3, l);
-            }
-            else
-            {
-                *s_name = '\0';
-            }
-        }
-    }
-    if (s_file)
-    {
-        if (file)
-        {
-            len += strlen (file);
-        }
-        else
-        {
-            l = strlen (s_file) - 2;
-            if (l)
-            {
-                memmove (s_file, s_file + 3, l);
-            }
-            else
-            {
-                *s_file = '\0';
-            }
-        }
-    }
-    
-    /* nothing (left) to do */
-    if (len == 0)
-    {
-        return 0;
-    }
-    
-    /* we need to allocate a new memory block to put the replacement(s) in */
-    char *new;
-    char *s;
-    
-    len += strlen (*str);
-    new = malloc (sizeof (*str) * len);
-    memcpy (new, *str, strlen (*str) + 1);
-    
-    if (s_icon)
-    {
-        /* s is s_icon in new */
-        s = new + (s_icon - *str);
-        /* move s_icon past the %i */
-        s_icon += 2;
-        /* put replacement in */
-        len = strlen (icon);
-        memcpy (s, "--icon ", 7);
-        memcpy (s + 7, icon, len);
-        memcpy (s + 7 + len, s_icon, strlen (s_icon) + 1); /* +1 for NUL */
-    }
-    
-    if (s_name)
-    {
-        /* s is s_name in new */
-        s = new + (s_name - *str);
-        /* move s_name past the %c */
-        s_name += 2;
-        if (s_icon && s_icon < s_name)
-        {
-            /* replacement happened for s_icon already, we need to adjust */
-            s += 7 + strlen (icon) - 2;
-        }
-        /* put replacement */
-        len = strlen (name);
-        memcpy (s, name, len);
-        memcpy (s + len, s_name, strlen (s_name) + 1);
-    }
-    
-    if (s_file)
-    {
-        /* s is s_file in new */
-        s = new + (s_file - *str);
-        /* move s_file past the %k */
-        s_file += 2;
-        if (s_icon && s_icon < s_file)
-        {
-            /* replacement happened for s_icon already, we need to adjust */
-            s += 7 + strlen (icon) - 2;
-        }
-        if (s_name && s_name < s_file)
-        {
-            /* replacement happened for s_name already, we need to adjust */
-            s += strlen (name) - 2;
-        }
-        /* put replacement */
-        len = strlen (file);
-        memcpy (s, file, len);
-        memcpy (s + len, s_file, strlen (s_file) + 1);
-    }
-    
+
     *str = new;
-    return 1;
+    return need_free;
 }
 
 /* if the argument was nothing but a field code, we shouldn't send anything,
@@ -317,7 +247,7 @@ replace_fields (char **str, char *icon, char *name, char *file)
     }                                                           \
 } while (0)
 
-void
+static void
 split_exec (char *exec, int *argc, char ***argv, int *alloc)
 {
     int    in_arg    = 0;
@@ -325,7 +255,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
     char   quote;
     int    had_field_code = 0;
     size_t l;
-    
+
     for (l = strlen (exec) + 1; l > 0 && --l; ++exec)
     {
         if (in_arg)
@@ -334,10 +264,10 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
             if (*exec == '%')
             {
                 /* those are either deprecated or don't apply here */
-                if (   exec[1] == 'f' || exec[1] == 'F' || exec[1] == 'u'
-                    || exec[1] == 'U' || exec[1] == 'd' || exec[1] == 'D'
-                    || exec[1] == 'n' || exec[1] == 'N' || exec[1] == 'v'
-                    || exec[1] == 'm')
+                if (       exec[1] == 'f' || exec[1] == 'F' || exec[1] == 'u'
+                        || exec[1] == 'U' || exec[1] == 'd' || exec[1] == 'D'
+                        || exec[1] == 'n' || exec[1] == 'N' || exec[1] == 'v'
+                        || exec[1] == 'm')
                 {
                     had_field_code = 1;
                     --l;
@@ -361,14 +291,14 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
                 *argv = NULL;
                 return;
             }
-            
+
             if (is_quoted)
             {
                 if (*exec == '\\')
                 {
                     /* some characters needs un-escaping */
-                    if (   exec[1] == '"' || exec[1] == '`' || exec[1] == '$'
-                        || exec[1] == '\\')
+                    if (exec[1] == '"' || exec[1] == '`' || exec[1] == '$'
+                            || exec[1] == '\\')
                     {
                         memmove (exec, exec + 1, l);
                         --l;
@@ -384,7 +314,7 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
             {
                 continue;
             }
-            
+
             /* arg over */
             *exec= '\0';
             in_arg = 0;
@@ -425,20 +355,20 @@ split_exec (char *exec, int *argc, char ***argv, int *alloc)
     }
 }
 
-int
+static int
 is_in_list (const char *name, char *items, char *item)
 {
     size_t len = strlen (items);
     char  *s;
-    
+
     p (LVL_DEBUG, "[%s] searching for %s in %s\n", name, item, items);
-    
+
     if (items[len - 1] != ';')
     {
         p (LVL_ERROR, "invalid syntax for %s\n", name);
         return 0;
     }
-    
+
     while ((s = strchr (items, ';')))
     {
         if (strncmp (item, items, (size_t) (s - items)) == 0)
@@ -450,12 +380,12 @@ is_in_list (const char *name, char *items, char *item)
     return 0;
 }
 
-parse_t
+static parse_t
 parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
 {
     struct stat statbuf;
     FILE       *fp;
-    
+
     /* get the file size */
     if (stat (file, &statbuf) != 0)
     {
@@ -467,13 +397,13 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
         p (LVL_ERROR, "%s: unable to stat file\n", file);
         return PARSE_FAILED;
     }
-    
+
     if (!(fp = fopen (file, "r")))
     {
         p (LVL_ERROR, "%s: unable to open file\n", file);
         return PARSE_FAILED;
     }
-    
+
     desktop_t *d = NULL;
     size_t  l;
     char   *line;
@@ -483,12 +413,12 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
     char   *key;
     char   *value;
     parse_t state       = PARSE_OK;
-    
+
     if (is_desktop)
     {
         d = (desktop_t *) out;
     }
-    
+
     /* can we read the whole file in data, or do we need to allocate memory? */
     if ((size_t) statbuf.st_size >= len_data)
     {
@@ -501,7 +431,7 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
     fread (*data, (size_t) statbuf.st_size, 1, fp);
     fclose (fp);
     strcat (*data, "\n");
-    
+
     /* now do the parsing */
     line = *data;
     p (LVL_DEBUG, "start parsing\n");
@@ -511,13 +441,13 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
         ++line_nb;
         p (LVL_DEBUG, "line %d: %s\n", line_nb, line);
         line = trim (line);
-        
+
         /* ignore comments & empty lines */
         if (*line == '#' || *line == '\0')
         {
             goto next;
         }
-        
+
         /* .desktop file: we only support section "Desktop Entry" */
         if (is_desktop && *line == '[' && (l = strlen (line)) && line[l - 1] == ']')
         {
@@ -528,24 +458,24 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
             if (!(value = strchr (line, '=')))
             {
                 p (LVL_ERROR, "%s: syntax error (missing =) line %d\n",
-                   file, line_nb);
+                        file, line_nb);
                 goto next;
             }
-            
+
             *value = '\0';
             key = trim (line);
             value = trim (value + 1);
-            
+
             if (is_desktop)
             {
                 /* .desktop file */
-                
+
                 if (strcmp (key, "Type") == 0)
                 {
                     if (strcmp (value, "Application") != 0)
                     {
                         p (LVL_ERROR, "%s: invalid type line %d: %s\n",
-                           file, line_nb, value);
+                                file, line_nb, value);
                         state = PARSE_FAILED;
                     }
                 }
@@ -560,7 +490,7 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
                     else if (strcmp (value, "false") != 0)
                     {
                         p (LVL_ERROR, "%s: invalid value for %s line %d: %s\n",
-                           file, key, line_nb, value);
+                                file, key, line_nb, value);
                         state = PARSE_FAILED;
                     }
                 }
@@ -581,8 +511,8 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
                     if (d->not_in)
                     {
                         p (LVL_ERROR,
-                           "%s: error, OnlyShowIn and NotShowIn both defined\n",
-                           file);
+                                "%s: error, OnlyShowIn and NotShowIn both defined\n",
+                                file);
                         state = PARSE_FAILED;
                     }
                     unesc (value);
@@ -594,8 +524,8 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
                     if (d->only_in)
                     {
                         p (LVL_ERROR,
-                           "%s: error, OnlyShowIn and NotShowIn both defined\n",
-                           file);
+                                "%s: error, OnlyShowIn and NotShowIn both defined\n",
+                                file);
                         state = PARSE_FAILED;
                     }
                     unesc (value);
@@ -624,7 +554,7 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
                     else if (strcmp (value, "false") != 0)
                     {
                         p (LVL_ERROR, "%s: invalid value for %s line %d: %s\n",
-                           file, key, line_nb, value);
+                                file, key, line_nb, value);
                         state = PARSE_FAILED;
                     }
                 }
@@ -632,7 +562,7 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
             else
             {
                 /* dapper.conf */
-                
+
                 if (strcmp (key, "Desktop") == 0)
                 {
                     desktop = value;
@@ -642,12 +572,12 @@ parse_file (int is_desktop, char *file, char **data, size_t len_data, void *out)
                 {
                     term_cmd = value;
                     p (LVL_VERBOSE, "set terminal command line prefix to: %s\n",
-                       term_cmd);
+                            term_cmd);
                 }
                 else
                 {
                     p (LVL_ERROR, "%s: unknown option line %d: %s\n",
-                       file, line_nb, key);
+                            file, line_nb, key);
                     state = PARSE_FAILED;
                 }
             }
@@ -669,7 +599,7 @@ next:
     return state;
 }
 
-void
+static void
 process_file (char *file)
 {
     char      buf[4096];
@@ -677,11 +607,11 @@ process_file (char *file)
     parse_t   state;
     desktop_t d;
     char     *s;
-    
+
     p (LVL_DEBUG, "processing file: %s\n", file);
     memset (&d, 0, sizeof (d));
     state = parse_file (1, file, &data, 4096, &d);
-    if (state == PARSE_OK || state == PARSE_ABORTED)
+    if (state == PARSE_OK || (state == PARSE_ABORTED && d.hidden))
     {
         if (d.hidden)
         {
@@ -692,7 +622,7 @@ process_file (char *file)
             }
             return;
         }
-        
+
         if (desktop)
         {
             if (d.only_in && !is_in_list ("OnlyShowIn", d.only_in, desktop))
@@ -717,7 +647,7 @@ process_file (char *file)
         else if (d.only_in)
         {
             p (LVL_ERROR, "%s: OnlyShowIn set, desktop unknown, no auto-start\n",
-               file);
+                    file);
             if (data != buf)
             {
                 free (data);
@@ -727,18 +657,18 @@ process_file (char *file)
         else if (d.not_in)
         {
             p (LVL_ERROR, "%s: NotShowIn set, desktop unknown, no auto-start\n",
-               file);
+                    file);
             if (data != buf)
             {
                 free (data);
             }
             return;
         }
-        
+
         if (d.try_exec)
         {
             int try_state = 0;
-            
+
             /* is it an absolute path or not? */
             if (*d.try_exec != '/')
             {
@@ -746,19 +676,19 @@ process_file (char *file)
                 if (!(s = getenv ("PATH")))
                 {
                     p (LVL_VERBOSE, "%s: no PATH to find TryExec (%s), no auto-start\n",
-                       file, d.try_exec);
+                            file, d.try_exec);
                     if (data != buf)
                     {
                         free (data);
                     }
                     return;
                 }
-                
+
                 char  buf2[2048];
                 char *ss;
                 char *_dir = strdup (s);
                 char *dir  = _dir;
-                
+
                 for (;;)
                 {
                     if ((s = strchr (dir, ':')))
@@ -797,7 +727,7 @@ process_file (char *file)
                     try_state = 1;
                 }
             }
-            
+
             if (try_state)
             {
                 p (LVL_DEBUG, "TryExec: found & executable\n");
@@ -805,8 +735,8 @@ process_file (char *file)
             else
             {
                 p (LVL_VERBOSE, "%s: unable to find executable TryExec (%s), "
-                                "no autostart\n",
-                   file, d.try_exec);
+                        "no autostart\n",
+                        file, d.try_exec);
                 if (data != buf)
                 {
                     free (data);
@@ -814,18 +744,18 @@ process_file (char *file)
                 return;
             }
         }
-        
+
         int    need_free;
         char **argv     = NULL;
         int    argc     = -1;
         int    alloc    = 0;
         pid_t  pid;
-        
+
         p (LVL_VERBOSE, "%s: triggering auto-start\n", file);
-        
+
         s = d.exec;
         need_free = replace_fields (&s, d.icon, NULL, file);
-        
+
         if (d.terminal)
         {
             if (term_cmd)
@@ -835,7 +765,7 @@ process_file (char *file)
             if (!argv)
             {
                 p (LVL_ERROR, "%s: error with terminal command line: %s\n",
-                   file, term_cmd);
+                        file, term_cmd);
                 if (data != buf)
                 {
                     free (data);
@@ -847,7 +777,7 @@ process_file (char *file)
                 return;
             }
         }
-        
+
         split_exec (s, &argc, &argv, &alloc);
         if (!argv)
         {
@@ -892,20 +822,24 @@ process_file (char *file)
             free (s);
         }
     }
-    
+    else
+    {
+        p (LVL_VERBOSE, "parsing failed (%d), no auto-start\n", state);
+    }
+
     if (data != buf)
     {
         free (data);
     }
 }
 
-void
+static void
 add_dir (dirs_t *dirs, char *dir, dir_type_t type)
 {
     int     i;
     size_t  l;
     char   *s;
-    
+
     l = strlen (dir);
     if (type == DIR_ADD_SUFFIX)
     {
@@ -919,12 +853,12 @@ add_dir (dirs_t *dirs, char *dir, dir_type_t type)
         l += 9; /* 9 = strlen ("autostart") */
         dir = s;
     }
-    
+
     if (l && dir[l - 1] == '/')
     {
         dir[l - 1] = '\0';
     }
-    
+
     /* make sure this dir hasn't been processed already */
     for (i = 0; i < dirs->len; ++i)
     {
@@ -948,7 +882,7 @@ add_dir (dirs_t *dirs, char *dir, dir_type_t type)
     dirs->dirs[dirs->len++].type = type;
 }
 
-int
+static int
 load_conf (char **data)
 {
     int          ret = 0;
@@ -956,13 +890,13 @@ load_conf (char **data)
     char        *file;
     char         buf[2048];
     size_t       len;
-    
+
     if (!home)
     {
         p (LVL_ERROR, "cannot load configuration: unable to get HOME path\n");
         return ret;
     }
-    
+
     len = (size_t) snprintf (buf, 2048, "%s/.config/dapper.conf", home);
     if (len < 2048)
     {
@@ -973,22 +907,22 @@ load_conf (char **data)
         file = malloc (sizeof (*file) * (len + 1));
         sprintf (file, "%s/.config/dapper.conf", home);
     }
-    
+
     p (LVL_VERBOSE, "loading config from %s\n", file);
     ret = parse_file (0, file, data, 0, NULL);
     ret = (ret == PARSE_OK || ret == PARSE_FILE_NOT_FOUND);
     p (LVL_VERBOSE, "\n");
-    
+
     if (file != buf)
     {
         free (file);
     }
-    
+
     return ret;
 }
 
-void
-show_help ()
+static void
+show_help (void)
 {
     fprintf (stdout, PACKAGE_NAME " - Desktop Applications Autostarter v" PACKAGE_VERSION "\n");
     fprintf (stdout, "\n");
@@ -1004,8 +938,8 @@ show_help ()
     exit (0);
 }
 
-void
-show_version ()
+static void
+show_version (void)
 {
     fprintf (stdout, PACKAGE_NAME " - Desktop Applications Autostarter v" PACKAGE_VERSION "\n");
     fprintf (stdout, "Copyright (C) 2012 Olivier Brunel\n");
@@ -1024,13 +958,13 @@ main (int argc, char **argv)
     char    *dir;
     char    *s          = NULL;
     char    *ss;
-    
+
     if (load_conf (&data_conf) == 0)
     {
         free (data_conf);
         return 1;
     }
-    
+
     int o;
     int index= 0;
     struct option options[] = {
@@ -1052,7 +986,7 @@ main (int argc, char **argv)
         {
             break;
         }
-        
+
         switch (o)
         {
             case 'h':
@@ -1085,7 +1019,7 @@ main (int argc, char **argv)
                     else
                     {
                         p (LVL_ERROR,
-                           "XDG_CONFIG_HOME not defined, unable to get HOME for default\n");
+                                "XDG_CONFIG_HOME not defined, unable to get HOME for default\n");
                         return 1;
                     }
                 }
@@ -1123,7 +1057,7 @@ main (int argc, char **argv)
             case 't':
                 term_cmd = optarg;
                 p (LVL_VERBOSE, "cmdline: set terminal command line prefix to: %s\n",
-                   term_cmd);
+                        term_cmd);
                 break;
             case 'v':
                 ++verbose;
@@ -1141,14 +1075,14 @@ main (int argc, char **argv)
         p (LVL_ERROR, "unknown argument: %s\n", argv[optind]);
         return 1;
     }
-    
+
     if (dirs.len == 0)
     {
         show_help ();
         /* not reached */
         return 1;
     }
-    
+
     int i;
     p (LVL_DEBUG, "processing folders\n");
     for (i = 0; i < dirs.len; ++i)
@@ -1204,7 +1138,7 @@ main (int argc, char **argv)
                 {
                     process = 0;
                     p (LVL_VERBOSE, "\n%s: name already processed, ignoring\n",
-                    dirent->d_name);
+                            dirent->d_name);
                     break;
                 }
             }
@@ -1237,7 +1171,7 @@ main (int argc, char **argv)
                 }
 
                 /* if we have a list, update the next pointer of the last item (l),
-                * else this becomes the first item of the list */
+                 * else this becomes the first item of the list */
                 if (files && last)
                 {
                     last->next = file;
@@ -1250,18 +1184,18 @@ main (int argc, char **argv)
         }
         p (LVL_VERBOSE, "\nclosing folder\n");
         closedir (dp);
-        
+
         if (   dirs.dirs[i].type == DIR_ADD_SUFFIX
-            || dirs.dirs[i].type == DIR_NEEDS_FREE)
+                || dirs.dirs[i].type == DIR_NEEDS_FREE)
         {
             free ((void *) dirs.dirs[i].dir);
         }
     }
     free (dirs.dirs);
-    
+
     /* memory cleaning */
     p (LVL_DEBUG, "memory cleaning\n");
-    
+
     files_t *f, *ff;
     for (f = files; f; f = ff)
     {
@@ -1269,8 +1203,9 @@ main (int argc, char **argv)
         free (f->name);
         free (f);
     }
-    
+
     free (data_conf);
-    
+
     return 0;
 }
+
