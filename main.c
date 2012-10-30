@@ -15,10 +15,10 @@
 
 #include "config.h"
 
-char *desktop  = NULL;
-char *term_cmd = NULL;
-int   verbose  = 0;
-int   dry_run  = 0;
+static char *desktop  = NULL;
+static char *term_cmd = NULL;
+static int   verbose  = 0;
+static int   dry_run  = 0;
 
 #define LVL_ERROR       -1
 #define LVL_NORMAL      0
@@ -149,7 +149,6 @@ static int
 replace_fields (char **str, char *icon, char *name, char *file)
 {
     const char *replacement[] = {
-        "~",    getenv ("HOME"),
         "%i",   icon,
         "%c",   name,
         "%k",   file,
@@ -599,6 +598,22 @@ next:
     return state;
 }
 
+static char *
+get_expanded_path (char *path)
+{
+    char *home;
+    char *s;
+
+    if (*path != '~' || !(home = getenv ("HOME")))
+    {
+        return strdup (path);
+    }
+
+    s = malloc (sizeof (*s) * (strlen (home) + strlen (path)));
+    sprintf (s, "%s%s", home, path + 1);
+    return s;
+}
+
 static void
 process_file (char *file)
 {
@@ -673,7 +688,11 @@ process_file (char *file)
             if (*d.try_exec != '/')
             {
                 /* must search the PATH then */
-                if (!(s = getenv ("PATH")))
+                char *path;
+                char *dir;
+
+                path = getenv ("PATH");
+                if (!path)
                 {
                     p (LVL_VERBOSE, "%s: no PATH to find TryExec (%s), no auto-start\n",
                             file, d.try_exec);
@@ -683,41 +702,48 @@ process_file (char *file)
                     }
                     return;
                 }
-
-                char  buf2[2048];
-                char *ss;
-                char *_dir = strdup (s);
-                char *dir  = _dir;
+                path = strdup (path);
+                dir = path;
 
                 for (;;)
                 {
+                    char   buf2[1024];
+                    char  *b = buf2;
+                    size_t l;
+
                     if ((s = strchr (dir, ':')))
                     {
                         *s = '\0';
                     }
-                    if (*dir != '~')
+                    l = strlen (dir) + strlen (d.try_exec) + 1; /* +1 == slash */
+                    if (l >= 1024)
                     {
-                        ss = (char *) "";
+                        b = malloc (sizeof (*b) * (l + 1));
                     }
-                    else
-                    {
-                        ss = getenv ("HOME");
-                        ++dir;
-                    }
-                    snprintf (buf2, 2048, "%s%s/%s", ss, dir, d.try_exec);
+                    sprintf (b, "%s/%s", dir, d.try_exec);
                     p (LVL_DEBUG, "TryExec: checking %s\n", buf2);
-                    if (access (buf2, F_OK | X_OK) == 0)
+                    if (access (b, F_OK | X_OK) == 0)
                     {
+                        if (b != buf2)
+                        {
+                            free (b);
+                        }
                         try_state = 1;
                         break;
                     }
-                    else if (!s)
+
+                    if (b != buf2)
+                    {
+                        free (b);
+                    }
+
+                    if (!s)
                     {
                         break;
                     }
                     dir = s + 1;
                 }
-                free (_dir);
+                free (path);
             }
             else
             {
@@ -792,13 +818,23 @@ process_file (char *file)
             }
             return;
         }
+
+        /* handle ~ for $HOME */
+        char **a;
+        int i;
+        a = malloc (sizeof (*a) * (size_t) (argc + 2));
+        for (i = 0; i <= argc; ++i)
+        {
+            a[i] = get_expanded_path (argv[i]);
+        }
+
         if (dry_run)
         {
-            char **a;
-            p (LVL_NORMAL, "auto-start: %s", argv[0]);
-            for (a = argv + 1; *a; ++a)
+            char **_a;
+            p (LVL_NORMAL, "auto-start: %s", a[0]);
+            for (_a = a + 1; *_a; ++_a)
             {
-                p (LVL_NORMAL, " %s", *a);
+                p (LVL_NORMAL, " %s", *_a);
             }
             p (LVL_NORMAL, "\n");
         }
@@ -808,7 +844,7 @@ process_file (char *file)
             if (pid == 0)
             {
                 /* child */
-                execvp (argv[0], argv);
+                execvp (a[0], a);
                 exit (1);
             }
             else if (pid == -1)
@@ -816,6 +852,12 @@ process_file (char *file)
                 p (LVL_ERROR, "%s: unable to fork\n", file);
             }
         }
+
+        for (i = 0; i <= argc; ++i)
+        {
+            free (a[i]);
+        }
+        free (a);
         free (argv);
         if (need_free)
         {
