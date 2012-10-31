@@ -240,10 +240,6 @@ replace_fields (char **str, char *icon, char *name, char *file)
         (*argv)[*argc] = NULL;                                  \
         --*argc;                                                \
     }                                                           \
-    else                                                        \
-    {                                                           \
-        p (LVL_DEBUG, "argv[%d]=%s\n", *argc, (*argv)[*argc]);  \
-    }                                                           \
 } while (0)
 
 static void
@@ -598,22 +594,6 @@ next:
     return state;
 }
 
-static char *
-get_expanded_path (char *path)
-{
-    char *home;
-    char *s;
-
-    if (*path != '~' || !(home = getenv ("HOME")))
-    {
-        return strdup (path);
-    }
-
-    s = malloc (sizeof (*s) * (strlen (home) + strlen (path)));
-    sprintf (s, "%s%s", home, path + 1);
-    return s;
-}
-
 static void
 process_file (char *file)
 {
@@ -820,21 +800,50 @@ process_file (char *file)
         }
 
         /* handle ~ for $HOME */
-        char **a;
+        const char *home = getenv ("HOME");
+        char **a, **ptr_to_free = NULL;
         int i;
-        a = malloc (sizeof (*a) * (size_t) (argc + 2));
-        for (i = 0; i <= argc; ++i)
+
+        if (home)
         {
-            a[i] = get_expanded_path (argv[i]);
+            for (i = 0; i <= argc; ++i)
+            {
+                /* should we expand the ~ for $HOME */
+                if (argv[i][0] == '~')
+                {
+                    if (!ptr_to_free)
+                    {
+                        /* alloc ptr_to_free to contain enough if all argv left
+                         * will need expansion; +1 to be NULL-terminated */
+                        ptr_to_free = calloc ((size_t) (argc - i + 2),
+                                sizeof (*ptr_to_free));
+                        a = ptr_to_free;
+                    }
+                    *a = malloc (sizeof (**a) * (strlen (home) + strlen (argv[i])));
+                    sprintf (*a, "%s%s", home, argv[i] + 1);
+                    /* replace pointer in argv */
+                    argv[i] = *a;
+                    ++a;
+                }
+            }
+        }
+
+        if (verbose >= LVL_DEBUG)
+        {
+            int i;
+            for (i = 0; i <= argc; ++i)
+            {
+                p (LVL_DEBUG, "argv[%d]=%s\n", i, argv[i]);
+            }
         }
 
         if (dry_run)
         {
-            char **_a;
-            p (LVL_NORMAL, "auto-start: %s", a[0]);
-            for (_a = a + 1; *_a; ++_a)
+            char **a;
+            p (LVL_NORMAL, "auto-start: %s", argv[0]);
+            for (a = argv + 1; *a; ++a)
             {
-                p (LVL_NORMAL, " %s", *_a);
+                p (LVL_NORMAL, " %s", *a);
             }
             p (LVL_NORMAL, "\n");
         }
@@ -844,7 +853,7 @@ process_file (char *file)
             if (pid == 0)
             {
                 /* child */
-                execvp (a[0], a);
+                execvp (argv[0], argv);
                 exit (1);
             }
             else if (pid == -1)
@@ -853,11 +862,15 @@ process_file (char *file)
             }
         }
 
-        for (i = 0; i <= argc; ++i)
+        /* free pointer(s) alloc-ed to expand ~ */
+        if (ptr_to_free)
         {
-            free (a[i]);
+            for (a = ptr_to_free; *a; ++a)
+            {
+                free (*a);
+            }
+            free (ptr_to_free);
         }
-        free (a);
         free (argv);
         if (need_free)
         {
