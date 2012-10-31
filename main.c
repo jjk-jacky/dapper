@@ -597,11 +597,16 @@ next:
 static void
 process_file (char *file)
 {
-    char      buf[4096];
-    char     *data = buf;
-    parse_t   state;
-    desktop_t d;
-    char     *s;
+    const char *home            = getenv ("HOME");
+    size_t      len_home        = strlen (home);
+    char         buf[4096];
+    char        *data           = buf;
+    parse_t      state;
+    desktop_t    d;
+    char        *s;
+    char       **a;
+    char       **ptr_to_free    = NULL;
+    int          i;
 
     p (LVL_DEBUG, "processing file: %s\n", file);
     memset (&d, 0, sizeof (d));
@@ -664,8 +669,20 @@ process_file (char *file)
         {
             int try_state = 0;
 
+            /* expand ~ to $HOME? */
+            if (*d.try_exec == '~')
+            {
+                s = malloc (sizeof (*s) * (len_home + strlen (d.try_exec)));
+                sprintf (s, "%s%s", home, d.try_exec + 1);
+                p (LVL_DEBUG, "TryExec: checking %s\n", s);
+                if (access (s, F_OK | X_OK) == 0)
+                {
+                    try_state = 1;
+                }
+                free (s);
+            }
             /* is it an absolute path or not? */
-            if (*d.try_exec != '/')
+            else if (*d.try_exec != '/')
             {
                 /* must search the PATH then */
                 char *path;
@@ -799,11 +816,7 @@ process_file (char *file)
             return;
         }
 
-        /* handle ~ for $HOME */
-        const char *home = getenv ("HOME");
-        char **a, **ptr_to_free = NULL;
-        int i;
-
+        /* expand ~ to $HOME */
         if (home)
         {
             for (i = 0; i <= argc; ++i)
@@ -819,7 +832,7 @@ process_file (char *file)
                                 sizeof (*ptr_to_free));
                         a = ptr_to_free;
                     }
-                    *a = malloc (sizeof (**a) * (strlen (home) + strlen (argv[i])));
+                    *a = malloc (sizeof (**a) * (len_home + strlen (argv[i])));
                     sprintf (*a, "%s%s", home, argv[i] + 1);
                     /* replace pointer in argv */
                     argv[i] = *a;
@@ -830,7 +843,6 @@ process_file (char *file)
 
         if (verbose >= LVL_DEBUG)
         {
-            int i;
             for (i = 0; i <= argc; ++i)
             {
                 p (LVL_DEBUG, "argv[%d]=%s\n", i, argv[i]);
@@ -839,7 +851,6 @@ process_file (char *file)
 
         if (dry_run)
         {
-            char **a;
             p (LVL_NORMAL, "auto-start: %s", argv[0]);
             for (a = argv + 1; *a; ++a)
             {
