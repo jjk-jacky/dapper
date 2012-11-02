@@ -6,7 +6,7 @@ nodist_man_MANS = dapper.1
 dist_doc_DATA = AUTHORS COPYING HISTORY README.md
 
 dist-hook:
-	cp $(srcdir)/dapper.pod $(distdir)/
+	cp "$(srcdir)/dapper.pod" "$(distdir)/"
 
 AM_CFLAGS = -g -std=c99 \
 		-Wall -Wextra -pedantic -Wshadow -Wpointer-arith -Wcast-align \
