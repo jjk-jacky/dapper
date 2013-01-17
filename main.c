@@ -1,3 +1,24 @@
+/**
+ * dapper - Copyright (C) 2012-2013 Olivier Brunel
+ *
+ * main.c
+ * Copyright (C) 2012-2013 Olivier Brunel <i.am.jack.mail@gmail.com>
+ *
+ * This file is part of dapper.
+ *
+ * dapper is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * dapper is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * dapper. If not, see http://www.gnu.org/licenses/
+ */
 
 /* for getopt_long */
 #define _GNU_SOURCE
@@ -604,7 +625,7 @@ process_file (char *file)
     parse_t      state;
     desktop_t    d;
     char        *s;
-    char       **a;
+    char       **a = NULL;
     char       **ptr_to_free    = NULL;
     int          i;
 
@@ -1008,7 +1029,7 @@ static void
 show_version (void)
 {
     fprintf (stdout, PACKAGE_NAME " - Desktop Applications Autostarter v" PACKAGE_VERSION "\n");
-    fprintf (stdout, "Copyright (C) 2012 Olivier Brunel\n");
+    fprintf (stdout, "Copyright (C) 2012-2013 Olivier Brunel\n");
     fprintf (stdout, "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n");
     fprintf (stdout, "This is free software: you are free to change and redistribute it.\n");
     fprintf (stdout, "There is NO WARRANTY, to the extent permitted by law.\n");

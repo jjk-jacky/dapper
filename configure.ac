@@ -2,10 +2,14 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([dapper], [0.1.3], [i.am.jack.mail@gmail.com])
-AM_INIT_AUTOMAKE([-Wall -Werror foreign])
+AC_INIT([dapper], [1.0.0], [i.am.jack.mail@gmail.com])
 AC_CONFIG_SRCDIR([main.c])
 AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_MACRO_DIR([m4])
+AC_CONFIG_AUX_DIR([build-aux])
+
+AM_INIT_AUTOMAKE([-Wall -Werror foreign silent-rules])
+AM_SILENT_RULES([yes])
 
 # Checks for programs.
 AC_PROG_CC
