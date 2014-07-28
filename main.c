@@ -1101,7 +1101,6 @@ main (int argc, char **argv)
                         sprintf (dir, "%s/.config/autostart", s);
                         p (LVL_VERBOSE, "using default: %s\n", dir);
                         add_dir (&dirs, dir, DIR_NEEDS_FREE);
-                        free (dir);
                     }
                     else
                     {
